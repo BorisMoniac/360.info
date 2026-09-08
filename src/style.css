@@ -72,6 +72,17 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 .conditions { padding: 0 6px 6px; display: flex; flex-direction: column; gap: 5px; }
 .condition { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr) minmax(0, 1fr) auto; gap: 4px; }
 .condition select, .condition input { font-size: 12px; }
+.condition.waiting select, .condition.waiting input { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.cond-hint { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+
+/*
+  Выпадающий список рисует браузер. Схема цветов задаётся из скрипта по фактической
+  теме окна, а цвета пунктов задаём явно, иначе в тёмной теме текст сливается с белой
+  подложкой и читается только под курсором.
+*/
+.theme-dark { --popup-bg: #232323; --popup-fg: #edf1f6; }
+.theme-light { --popup-bg: #ffffff; --popup-fg: #16191e; }
+option { background-color: var(--popup-bg, #232323); color: var(--popup-fg, #edf1f6); }
 
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bar .spacer { flex: 1; }

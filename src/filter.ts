@@ -21,6 +21,16 @@ function allValues(hit: Hit): string[] {
   return values;
 }
 
+/**
+ * Достать число из текста свойства.
+ * Значения в моделях часто идут с единицами и пробелами: «1 200,5 мм».
+ */
+export function toNumber(text: string): number {
+  const normalized = text.replace(/\s| /g, '').replace(',', '.');
+  const found = normalized.match(/-?\d+(\.\d+)?/);
+  return found ? parseFloat(found[0]) : NaN;
+}
+
 /** Сравнить одно значение с условием. */
 function test(value: string | undefined, condition: Condition): boolean {
   const has = value !== undefined && value !== '';
@@ -48,8 +58,8 @@ function test(value: string | undefined, condition: Condition): boolean {
       return left !== right;
     case 'gt':
     case 'lt': {
-      const a = parseFloat((value as string).replace(',', '.'));
-      const b = parseFloat(condition.value.replace(',', '.'));
+      const a = toNumber(value as string);
+      const b = toNumber(condition.value);
       if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
       return condition.op === 'gt' ? a > b : a < b;
     }
@@ -67,9 +77,22 @@ function matches(hit: Hit, condition: Condition): boolean {
   return allValues(hit).some(value => test(value, condition));
 }
 
+/**
+ * Условие, которое действительно нужно применять.
+ *
+ * Пока значение не введено, условие ничего не отбирает. Иначе список пустел бы
+ * сразу после выбора оператора, до того как пользователь успел набрать число.
+ */
+export function isActive(condition: Condition): boolean {
+  if (condition.op === 'exists' || condition.op === 'missing') return true;
+  if (condition.value.trim() === '') return false;
+  if (condition.op === 'gt' || condition.op === 'lt') return Number.isFinite(toNumber(condition.value));
+  return true;
+}
+
 /** Отобрать находки, удовлетворяющие всем условиям. */
 export function applyConditions(hits: Hit[], conditions: Condition[]): Hit[] {
-  const active = conditions.filter(c => c.op === 'exists' || c.op === 'missing' || c.value.trim() !== '' || c.key !== ANY_KEY);
+  const active = conditions.filter(isActive);
   if (!active.length) return hits;
   return hits.filter(hit => active.every(condition => matches(hit, condition)));
 }

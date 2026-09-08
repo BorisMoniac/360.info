@@ -5,7 +5,7 @@
  * со стилями программы. Состояние запроса и условий хранится в localStorage.
  */
 import { ANY_KEY, Condition, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
-import { applyConditions, propertyKeys } from './filter';
+import { applyConditions, isActive, propertyKeys } from './filter';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, select } from './view';
 
@@ -45,19 +45,37 @@ function saveOptions(options: SearchOptions): void {
 }
 
 /**
+ * Определить, светлая тема у программы или тёмная.
+ *
+ * Идём вверх по предкам до первого непрозрачного фона: это и есть фон окна.
+ * Если такого не нашлось, спрашиваем системную настройку.
+ */
+function isLightTheme(start: HTMLElement | null): boolean {
+  let node = start;
+  while (node) {
+    const parts = getComputedStyle(node).backgroundColor.match(/[\d.]+/g);
+    if (parts && parts.length >= 3 && (parts.length < 4 || Number(parts[3]) > 0.1)) {
+      const [r, g, b] = parts.map(Number);
+      return r * 0.299 + g * 0.587 + b * 0.114 > 140;
+    }
+    node = node.parentElement;
+  }
+  return !matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+/**
  * Подстроить схему цветов под тему программы.
  *
- * Выпадающие списки рисует сам браузер, и в тёмной теме они остаются белыми,
- * пока элементу не задана тёмная схема. Яркость берём из той же переменной,
- * которой программа красит поверхность панели.
+ * Выпадающие списки рисует сам браузер. В тёмной теме их подложка остаётся
+ * белой, а текст наследует светлый цвет панели, поэтому надписи не видно, пока
+ * на них не наведёшься. Схема цветов чинит подложку, а явные цвета у option
+ * чинят текст.
  */
-function applyColorScheme(host: HTMLElement, probe: HTMLElement): void {
-  const background = getComputedStyle(probe).backgroundColor;
-  const parts = background.match(/[\d.]+/g);
-  if (!parts || parts.length < 3) return;
-  const [r, g, b] = parts.map(Number);
-  const light = (r * 0.299 + g * 0.587 + b * 0.114) > 128;
+function applyColorScheme(host: HTMLElement, app: HTMLElement): void {
+  const light = isLightTheme(host.parentElement ?? host);
   host.style.colorScheme = light ? 'light' : 'dark';
+  app.classList.toggle('theme-light', light);
+  app.classList.toggle('theme-dark', !light);
 }
 
 /** Смонтировать панель в переданный элемент. */
@@ -165,12 +183,18 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
         '<option value="' + o.op + '"' + (o.op === condition.op ? ' selected' : '') + '>' + o.label + '</option>'
       ).join('');
       const needsValue = OPERATORS.find(o => o.op === condition.op)?.needsValue ?? true;
-      return '<div class="condition" data-id="' + condition.id + '">' +
+      const numeric = condition.op === 'gt' || condition.op === 'lt';
+      const waiting = needsValue && !isActive(condition);
+      const hint = waiting
+        ? (numeric && condition.value.trim() !== '' ? 'нужно число' : 'введите значение')
+        : '';
+      return '<div class="condition' + (waiting ? ' waiting' : '') + '" data-id="' + condition.id + '">' +
         '<select class="cond-key">' + keyOptions + '</select>' +
         '<select class="cond-op">' + opOptions + '</select>' +
-        '<input class="cond-value" type="search" placeholder="значение" value="' + esc(condition.value) + '"' +
-        (needsValue ? '' : ' disabled') + '>' +
+        '<input class="cond-value" type="search" placeholder="' + (numeric ? 'число' : 'значение') + '" value="' +
+        esc(condition.value) + '"' + (needsValue ? '' : ' disabled') + '>' +
         '<button class="cond-remove" title="Удалить условие">×</button>' +
+        (hint ? '<div class="cond-hint">' + hint + ', условие пока не применяется</div>' : '') +
         '</div>';
     }).join('');
   }
@@ -224,8 +248,9 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     updateButtons();
     if (quiet) return;
     if (!found.length) return;
-    say(conditions.length
-      ? 'Найдено: ' + found.length + '. После условий отбора: ' + shown.length + '.'
+    const active = conditions.filter(isActive).length;
+    say(active
+      ? 'Найдено: ' + found.length + '. После отбора по ' + active + ' условиям: ' + shown.length + '.'
       : 'Найдено: ' + found.length + '.');
   }
 
@@ -289,7 +314,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       if (!found.length) {
         say('Ничего не найдено. Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
       } else {
-        const filtered = conditions.length ? ' После условий отбора: ' + shown.length + '.' : '';
+        const filtered = conditions.filter(isActive).length ? ' После условий отбора: ' + shown.length + '.' : '';
         say('Найдено: ' + found.length + '.' + filtered +
           ' Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models +
           ' за ' + Math.round(result.elapsed / 100) / 10 + ' с.');
@@ -401,11 +426,30 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     const condition = conditions.find(c => c.id === Number(box.dataset.id));
     if (!condition) return;
     condition.value = (target as HTMLInputElement).value;
+
+    // Подсказку обновляем на месте: перерисовка списка увела бы курсор из поля.
+    const numeric = condition.op === 'gt' || condition.op === 'lt';
+    const waiting = !isActive(condition);
+    box.classList.toggle('waiting', waiting);
+    let hint = box.querySelector('.cond-hint') as HTMLElement | null;
+    if (waiting) {
+      if (!hint) {
+        hint = document.createElement('div');
+        hint.className = 'cond-hint';
+        box.appendChild(hint);
+      }
+      hint.textContent = (numeric && condition.value.trim() !== '' ? 'нужно число' : 'введите значение') +
+        ', условие пока не применяется';
+    } else if (hint) {
+      hint.remove();
+    }
+
     applyFilters();
   });
 
   // Тема программы может смениться на ходу, поэтому схему цветов проверяем и позже.
   app.addEventListener('pointerdown', () => applyColorScheme(container, app));
+  setTimeout(() => applyColorScheme(container, app), 500);
 
   renderConditions();
   updateButtons();
