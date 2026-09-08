@@ -3,14 +3,14 @@
  *
  * Элементы моделей IFC и SMDX попадают в чертёж как слои с типизированными
  * свойствами, поэтому поиск идёт по слоям: по имени, по пути, по типу и по всем
- * названиям и значениям свойств.
+ * названиям и значениям свойств. Предела на число находок нет: ищем всё.
  */
 import { Hit, SearchOptions, SearchResult } from './model';
 
 /** Насколько глубоко разбирать вложенные свойства. */
-const MAX_DEPTH = 6;
+const MAX_DEPTH = 8;
 /** Предел узлов свойств на один слой, чтобы тяжёлая модель не подвесила поиск. */
-const MAX_NODES = 600;
+const MAX_NODES = 800;
 /** Через сколько слоёв отдавать управление интерфейсу. */
 const YIELD_EVERY = 400;
 
@@ -44,7 +44,7 @@ export function sourcesOf(project: Drawing, includeHidden: boolean): Source[] {
   return sources;
 }
 
-/** Привести значение к строке для сравнения. Объекты и массивы сюда не попадают. */
+/** Привести значение к строке. Объекты и массивы сюда не попадают. */
 function asText(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   const type = typeof value;
@@ -53,75 +53,67 @@ function asText(value: unknown): string | undefined {
   return undefined;
 }
 
-/** Найти совпадение в типизированных свойствах слоя. */
-function matchProperties(layer: DwgLayer, needle: string, caseSensitive: boolean): string | undefined {
-  let properties: DwgTypedObject | undefined;
-  try {
-    properties = layer.typedProperties();
-  } catch {
-    return undefined;
-  }
-  if (!properties || typeof properties !== 'object') return undefined;
-
+/**
+ * Развернуть типизированные свойства в плоский словарь.
+ * Ключи получают точечный путь, значения приводятся к строке.
+ */
+export function flattenProperties(layer: DwgLayer): Record<string, string> {
+  const out: Record<string, string> = {};
   let nodes = 0;
 
-  const visit = (value: unknown, label: string, depth: number): string | undefined => {
-    if (depth > MAX_DEPTH || nodes > MAX_NODES) return undefined;
+  const visit = (value: unknown, prefix: string, depth: number): void => {
+    if (depth > MAX_DEPTH || nodes > MAX_NODES) return;
     nodes++;
-
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        const found = visit(value[i], label + '[' + i + ']', depth + 1);
-        if (found) return found;
-      }
-      return undefined;
-    }
 
     const text = asText(value);
     if (text !== undefined) {
-      const haystack = caseSensitive ? text : text.toLowerCase();
-      return haystack.includes(needle) ? (label || 'значение') + ': ' + text : undefined;
+      if (prefix) out[prefix] = text;
+      return;
     }
-
-    if (!value || typeof value !== 'object') return undefined;
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) visit(value[i], prefix + '[' + i + ']', depth + 1);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
 
     const record = value as Record<string, unknown>;
-    const named = asText(record.$name);
-    const own = named ? label + ' (' + named + ')' : label;
-
     if (record.$value !== undefined) {
-      const found = visit(record.$value, own, depth + 1);
-      if (found) return found;
+      visit(record.$value, prefix, depth + 1);
+      return;
     }
-
     for (const key in record) {
-      if (key === '$value' || key === '$type' || key === '$values') continue;
-      const child = record[key];
-      const path = label ? label + '.' + key : key;
-      const childText = asText(child);
-      if (childText !== undefined) {
-        nodes++;
-        const haystack = caseSensitive ? childText : childText.toLowerCase();
-        const keyText = caseSensitive ? key : key.toLowerCase();
-        if (haystack.includes(needle) || keyText.includes(needle)) return path + ': ' + childText;
-        continue;
-      }
-      const found = visit(child, path, depth + 1);
-      if (found) return found;
+      if (key.startsWith('$')) continue;
+      visit(record[key], prefix ? prefix + '.' + key : key, depth + 1);
     }
-    return undefined;
   };
 
-  return visit(properties, '', 0);
+  try {
+    visit(layer.typedProperties(), '', 0);
+  } catch {
+    // Часть свойств недоступна, отдаём что успели собрать.
+  }
+  return out;
+}
+
+/** Найти совпадение в типизированных свойствах слоя. */
+function matchProperties(layer: DwgLayer, needle: string, caseSensitive: boolean): string | undefined {
+  const props = flattenProperties(layer);
+  for (const key in props) {
+    const value = props[key];
+    const haystack = caseSensitive ? value : value.toLowerCase();
+    const keyText = caseSensitive ? key : key.toLowerCase();
+    if (haystack.includes(needle) || keyText.includes(needle)) return key + ': ' + value;
+  }
+  return undefined;
 }
 
 /** Проверить один слой. Возвращает описание совпадения или undefined. */
-function matchLayer(layer: DwgLayer, needle: string, options: SearchOptions): string | undefined {
+function matchLayer(layer: DwgLayer, needle: string, caseSensitive: boolean): string | undefined {
   const name = layer.name ?? '';
-  if ((options.caseSensitive ? name : name.toLowerCase()).includes(needle)) return 'имя: ' + name;
+  if ((caseSensitive ? name : name.toLowerCase()).includes(needle)) return 'имя: ' + name;
 
   const path = layer.$path ?? '';
-  if ((options.caseSensitive ? path : path.toLowerCase()).includes(needle)) return 'путь: ' + path;
+  if ((caseSensitive ? path : path.toLowerCase()).includes(needle)) return 'путь: ' + path;
 
   let typeName = '';
   try {
@@ -129,12 +121,11 @@ function matchLayer(layer: DwgLayer, needle: string, options: SearchOptions): st
   } catch {
     typeName = '';
   }
-  if (typeName && (options.caseSensitive ? typeName : typeName.toLowerCase()).includes(needle)) {
+  if (typeName && (caseSensitive ? typeName : typeName.toLowerCase()).includes(needle)) {
     return 'тип: ' + typeName;
   }
 
-  if (options.scope === 'name') return undefined;
-  return matchProperties(layer, needle, options.caseSensitive);
+  return matchProperties(layer, needle, caseSensitive);
 }
 
 /** Ход выполнения поиска. */
@@ -151,15 +142,12 @@ export async function runSearch(
   const needle = options.caseSensitive ? query : query.toLowerCase();
   const hits: Hit[] = [];
   let scanned = 0;
-  let truncated = false;
 
-  if (!needle) return {hits, scanned: 0, models: 0, truncated: false, elapsed: 0};
+  if (!needle) return {hits, scanned: 0, models: 0, elapsed: 0};
 
   const sources = sourcesOf(project, options.includeHidden);
 
   for (const source of sources) {
-    if (truncated) break;
-
     const layers: DwgLayer[] = [];
     source.drawing.layers.forEach(layer => {
       layers.push(layer);
@@ -172,7 +160,7 @@ export async function runSearch(
         await pause();
       }
 
-      const match = matchLayer(layer, needle, options);
+      const match = matchLayer(layer, needle, options.caseSensitive);
       if (!match) continue;
 
       hits.push({
@@ -181,18 +169,23 @@ export async function runSearch(
         name: layer.name ?? 'без имени',
         model: source.title,
         path: layer.$path ?? '',
-        match
+        match,
+        props: {}
       });
+    }
+  }
 
-      if (hits.length >= options.limit) {
-        truncated = true;
-        break;
-      }
+  // Свойства собираем только для находок: их немного по сравнению со всей моделью.
+  for (let i = 0; i < hits.length; i++) {
+    hits[i].props = flattenProperties(hits[i].layer);
+    if (i % 200 === 0) {
+      progress?.(scanned, hits.length, 'чтение свойств');
+      await pause();
     }
   }
 
   progress?.(scanned, hits.length, '');
-  return {hits, scanned, models: sources.length, truncated, elapsed: Date.now() - started};
+  return {hits, scanned, models: sources.length, elapsed: Date.now() - started};
 }
 
 function pause(): Promise<void> {

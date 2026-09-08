@@ -4,7 +4,7 @@ import { activeProject, runSearch } from './search';
 import { clear as clearSelection, select } from './view';
 import css from './style.css?inline';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const VIEW = 'nashepo.info/search_panel';
 
 /**

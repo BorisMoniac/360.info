@@ -2,13 +2,14 @@
  * Панель поиска.
  *
  * Разметка строится вручную в теневом дереве, чтобы стили плагина не смешивались
- * со стилями программы. Состояние запроса хранится в localStorage.
+ * со стилями программы. Состояние запроса и условий хранится в localStorage.
  */
-import { Hit, SearchOptions, defaultOptions } from './model';
+import { ANY_KEY, Condition, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
+import { applyConditions, propertyKeys } from './filter';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, select } from './view';
 
-const STORE_KEY = 'nashepo.info.search.v1';
+const STORE_KEY = 'nashepo.info.search.v2';
 
 /** Экранировать текст для вставки в разметку. */
 function esc(value: string): string {
@@ -26,10 +27,8 @@ function loadOptions(): SearchOptions {
     const saved = JSON.parse(raw) as Partial<SearchOptions>;
     return {
       query: typeof saved.query === 'string' ? saved.query : base.query,
-      scope: saved.scope === 'name' ? 'name' : 'all',
       caseSensitive: saved.caseSensitive === true,
-      includeHidden: saved.includeHidden === true,
-      limit: Number.isFinite(saved.limit) ? Math.min(Math.max(Number(saved.limit), 10), 5000) : base.limit
+      includeHidden: saved.includeHidden === true
     };
   } catch {
     return base;
@@ -45,26 +44,44 @@ function saveOptions(options: SearchOptions): void {
   }
 }
 
+/**
+ * Подстроить схему цветов под тему программы.
+ *
+ * Выпадающие списки рисует сам браузер, и в тёмной теме они остаются белыми,
+ * пока элементу не задана тёмная схема. Яркость берём из той же переменной,
+ * которой программа красит поверхность панели.
+ */
+function applyColorScheme(host: HTMLElement, probe: HTMLElement): void {
+  const background = getComputedStyle(probe).backgroundColor;
+  const parts = background.match(/[\d.]+/g);
+  if (!parts || parts.length < 3) return;
+  const [r, g, b] = parts.map(Number);
+  const light = (r * 0.299 + g * 0.587 + b * 0.114) > 128;
+  host.style.colorScheme = light ? 'light' : 'dark';
+}
+
 /** Смонтировать панель в переданный элемент. */
 export function mountPanel(container: HTMLElement, ctx: Context, css: string, version: string): void {
   const root = container.attachShadow ? container.shadowRoot || container.attachShadow({mode: 'open'}) : container;
   const options = loadOptions();
 
   root.innerHTML = '<style>' + css + '</style>' +
-    '<main class="app">' +
+    '<main class="app" id="app">' +
     '<div class="query">' +
     '<input id="query" type="search" placeholder="Значение, имя, GUID, что угодно" value="' + esc(options.query) + '">' +
     '<button class="primary" id="find">Найти</button>' +
     '</div>' +
     '<div class="options">' +
-    '<label>Искать<select id="scope">' +
-    '<option value="all">везде</option>' +
-    '<option value="name">только имена</option>' +
-    '</select></label>' +
-    '<label><input id="case" type="checkbox"> регистр</label>' +
-    '<label><input id="hidden" type="checkbox"> скрытые</label>' +
-    '<label>предел<input id="limit" type="number" min="10" max="5000" step="10" value="' + options.limit + '"></label>' +
+    '<label><input id="case" type="checkbox"> учитывать регистр</label>' +
+    '<label><input id="hidden" type="checkbox"> искать в скрытых</label>' +
     '</div>' +
+
+    '<section class="block">' +
+    '<div class="block-head"><button class="fold" id="fold-conditions" aria-expanded="false">Условия отбора <span id="conditions-count"></span></button>' +
+    '<button id="add-condition" title="Добавить условие">＋</button></div>' +
+    '<div class="conditions" id="conditions" hidden></div>' +
+    '</section>' +
+
     '<div class="bar">' +
     '<button id="all">Подсветить все</button>' +
     '<button id="prev" title="Предыдущий элемент">←</button>' +
@@ -73,15 +90,22 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<button id="reset">Снять</button>' +
     '</div>' +
     '<div class="status" id="status">Введите значение и нажмите «Найти».</div>' +
+
     '<div class="list" id="list"><div class="empty">Пока ничего не найдено</div></div>' +
+
+    '<section class="block props-block">' +
+    '<div class="block-head"><button class="fold" id="fold-props" aria-expanded="true">Свойства элемента</button>' +
+    '<input id="prop-filter" type="search" placeholder="фильтр свойств"></div>' +
+    '<div class="props" id="props"><div class="empty">Выберите элемент в списке</div></div>' +
+    '</section>' +
+
     '<div class="hint">Щелчок по строке подсвечивает элемент и переводит к нему камеру. Версия ' + esc(version) + '</div>' +
     '</main>';
 
+  const app = root.querySelector('#app') as HTMLElement;
   const queryInput = root.querySelector('#query') as HTMLInputElement;
-  const scopeSelect = root.querySelector('#scope') as HTMLSelectElement;
   const caseBox = root.querySelector('#case') as HTMLInputElement;
   const hiddenBox = root.querySelector('#hidden') as HTMLInputElement;
-  const limitInput = root.querySelector('#limit') as HTMLInputElement;
   const findButton = root.querySelector('#find') as HTMLButtonElement;
   const allButton = root.querySelector('#all') as HTMLButtonElement;
   const prevButton = root.querySelector('#prev') as HTMLButtonElement;
@@ -89,12 +113,22 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   const resetButton = root.querySelector('#reset') as HTMLButtonElement;
   const status = root.querySelector('#status') as HTMLElement;
   const list = root.querySelector('#list') as HTMLElement;
+  const conditionsBox = root.querySelector('#conditions') as HTMLElement;
+  const conditionsCount = root.querySelector('#conditions-count') as HTMLElement;
+  const addCondition = root.querySelector('#add-condition') as HTMLButtonElement;
+  const foldConditions = root.querySelector('#fold-conditions') as HTMLButtonElement;
+  const foldProps = root.querySelector('#fold-props') as HTMLButtonElement;
+  const propsBox = root.querySelector('#props') as HTMLElement;
+  const propFilter = root.querySelector('#prop-filter') as HTMLInputElement;
 
-  scopeSelect.value = options.scope;
   caseBox.checked = options.caseSensitive;
   hiddenBox.checked = options.includeHidden;
+  applyColorScheme(container, app);
 
-  let hits: Hit[] = [];
+  let found: Hit[] = [];
+  let shown: Hit[] = [];
+  let conditions: Condition[] = [];
+  let nextId = 1;
   let current = -1;
   let busy = false;
 
@@ -104,31 +138,49 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   }
 
   function readOptions(): SearchOptions {
-    const limit = Math.min(Math.max(parseInt(limitInput.value, 10) || 500, 10), 5000);
-    limitInput.value = String(limit);
-    return {
-      query: queryInput.value,
-      scope: scopeSelect.value === 'name' ? 'name' : 'all',
-      caseSensitive: caseBox.checked,
-      includeHidden: hiddenBox.checked,
-      limit
-    };
+    return {query: queryInput.value, caseSensitive: caseBox.checked, includeHidden: hiddenBox.checked};
   }
 
   function updateButtons(): void {
-    const has = hits.length > 0;
+    const has = shown.length > 0;
     allButton.disabled = !has || busy;
     prevButton.disabled = !has || busy;
     nextButton.disabled = !has || busy;
     findButton.disabled = busy;
   }
 
-  function render(): void {
-    if (!hits.length) {
-      list.innerHTML = '<div class="empty">Пока ничего не найдено</div>';
+  function renderConditions(): void {
+    const keys = propertyKeys(found);
+    conditionsCount.textContent = conditions.length ? '· ' + conditions.length : '';
+    if (!conditions.length) {
+      conditionsBox.innerHTML = '<div class="empty">Условий нет. Кнопка ＋ добавит условие по свойству.</div>';
       return;
     }
-    list.innerHTML = hits.map(hit =>
+    conditionsBox.innerHTML = conditions.map(condition => {
+      const keyOptions = ['<option value="">любое свойство</option>']
+        .concat(keys.map(key =>
+          '<option value="' + esc(key) + '"' + (key === condition.key ? ' selected' : '') + '>' + esc(key) + '</option>'
+        )).join('');
+      const opOptions = OPERATORS.map(o =>
+        '<option value="' + o.op + '"' + (o.op === condition.op ? ' selected' : '') + '>' + o.label + '</option>'
+      ).join('');
+      const needsValue = OPERATORS.find(o => o.op === condition.op)?.needsValue ?? true;
+      return '<div class="condition" data-id="' + condition.id + '">' +
+        '<select class="cond-key">' + keyOptions + '</select>' +
+        '<select class="cond-op">' + opOptions + '</select>' +
+        '<input class="cond-value" type="search" placeholder="значение" value="' + esc(condition.value) + '"' +
+        (needsValue ? '' : ' disabled') + '>' +
+        '<button class="cond-remove" title="Удалить условие">×</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  function renderList(): void {
+    if (!shown.length) {
+      list.innerHTML = '<div class="empty">' + (found.length ? 'Условия отбора не пропустили ни одного элемента' : 'Пока ничего не найдено') + '</div>';
+      return;
+    }
+    list.innerHTML = shown.map(hit =>
       '<button class="row" data-index="' + hit.index + '">' +
       '<div class="name">' + esc(hit.name) + '</div>' +
       '<div class="meta"><span class="model">' + esc(hit.model) + '</span><span>' + esc(hit.path) + '</span></div>' +
@@ -137,25 +189,68 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     ).join('');
   }
 
-  function highlight(index: number): void {
-    current = index;
-    const rows = list.querySelectorAll('.row');
-    rows.forEach(row => {
-      row.classList.toggle('active', Number((row as HTMLElement).dataset.index) === index);
-    });
-    const active = list.querySelector('.row.active') as HTMLElement | null;
-    active?.scrollIntoView({block: 'nearest'});
+  function renderProps(): void {
+    const hit = shown.find(h => h.index === current);
+    if (!hit) {
+      propsBox.innerHTML = '<div class="empty">Выберите элемент в списке</div>';
+      return;
+    }
+    const needle = propFilter.value.trim().toLowerCase();
+    const rows: [string, string][] = [
+      ['Имя', hit.name],
+      ['Модель', hit.model],
+      ['Путь', hit.path]
+    ];
+    for (const key of Object.keys(hit.props).sort((a, b) => a.localeCompare(b, 'ru'))) {
+      rows.push([key, hit.props[key]]);
+    }
+    const visible = needle
+      ? rows.filter(([key, value]) => key.toLowerCase().includes(needle) || value.toLowerCase().includes(needle))
+      : rows;
+    if (!visible.length) {
+      propsBox.innerHTML = '<div class="empty">Ничего не подходит под фильтр</div>';
+      return;
+    }
+    propsBox.innerHTML = '<table class="props-table"><tbody>' + visible.map(([key, value]) =>
+      '<tr><th title="' + esc(key) + '">' + esc(key) + '</th><td title="' + esc(value) + '">' + esc(value) + '</td></tr>'
+    ).join('') + '</tbody></table>';
   }
 
-  function focusHit(index: number): void {
-    if (index < 0 || index >= hits.length) return;
-    const hit = hits[index];
+  function applyFilters(quiet = false): void {
+    shown = applyConditions(found, conditions);
+    current = -1;
+    renderList();
+    renderProps();
+    updateButtons();
+    if (quiet) return;
+    if (!found.length) return;
+    say(conditions.length
+      ? 'Найдено: ' + found.length + '. После условий отбора: ' + shown.length + '.'
+      : 'Найдено: ' + found.length + '.');
+  }
+
+  function highlight(index: number): void {
+    current = index;
+    list.querySelectorAll('.row').forEach(row => {
+      row.classList.toggle('active', Number((row as HTMLElement).dataset.index) === index);
+    });
+    (list.querySelector('.row.active') as HTMLElement | null)?.scrollIntoView({block: 'nearest'});
+    renderProps();
+  }
+
+  function focusAt(position: number): void {
+    if (position < 0 || position >= shown.length) return;
+    const hit = shown[position];
     if (!select(ctx, [hit.layer], true)) {
       say('Нет активного вида чертежа. Откройте окно проекта.', true);
       return;
     }
-    highlight(index);
-    say('Элемент ' + (index + 1) + ' из ' + hits.length + '. ' + hit.model);
+    highlight(hit.index);
+    say('Элемент ' + (position + 1) + ' из ' + shown.length + '. ' + hit.model);
+  }
+
+  function positionOfCurrent(): number {
+    return shown.findIndex(hit => hit.index === current);
   }
 
   async function find(): Promise<void> {
@@ -177,24 +272,27 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     }
 
     busy = true;
-    hits = [];
+    found = [];
+    shown = [];
     current = -1;
     updateButtons();
     say('Поиск…');
 
     try {
-      const result = await runSearch(project, options, (scanned, found, model) => {
-        say('Просмотрено ' + scanned + ', найдено ' + found + (model ? '. Модель: ' + model : ''));
+      const result = await runSearch(project, options, (scanned, hits, model) => {
+        say('Просмотрено ' + scanned + ', найдено ' + hits + (model ? '. ' + model : ''));
       });
-      hits = result.hits;
-      render();
+      found = result.hits;
+      renderConditions();
+      applyFilters(true);
 
-      if (!hits.length) {
+      if (!found.length) {
         say('Ничего не найдено. Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
       } else {
-        const limited = result.truncated ? ' Показаны первые ' + options.limit + ', увеличьте предел.' : '';
-        say('Найдено: ' + hits.length + '. Просмотрено слоёв: ' + result.scanned +
-          ' в моделях: ' + result.models + ' за ' + Math.round(result.elapsed / 100) / 10 + ' с.' + limited);
+        const filtered = conditions.length ? ' После условий отбора: ' + shown.length + '.' : '';
+        say('Найдено: ' + found.length + '.' + filtered +
+          ' Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models +
+          ' за ' + Math.round(result.elapsed / 100) / 10 + ' с.');
       }
     } catch (e) {
       say('Ошибка поиска: ' + ((e as Error)?.message ?? String(e)), true);
@@ -208,26 +306,30 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   queryInput.addEventListener('keydown', event => {
     if ((event as KeyboardEvent).key === 'Enter') void find();
   });
+  caseBox.addEventListener('change', () => saveOptions(readOptions()));
+  hiddenBox.addEventListener('change', () => saveOptions(readOptions()));
 
   allButton.addEventListener('click', () => {
-    if (!hits.length) return;
-    if (!select(ctx, hits.map(hit => hit.layer), true)) {
+    if (!shown.length) return;
+    if (!select(ctx, shown.map(hit => hit.layer), true)) {
       say('Нет активного вида чертежа. Откройте окно проекта.', true);
       return;
     }
     current = -1;
     highlight(-1);
-    say('Подсвечено элементов: ' + hits.length + '.');
+    say('Подсвечено элементов: ' + shown.length + '.');
   });
 
   prevButton.addEventListener('click', () => {
-    if (!hits.length) return;
-    focusHit(current <= 0 ? hits.length - 1 : current - 1);
+    if (!shown.length) return;
+    const position = positionOfCurrent();
+    focusAt(position <= 0 ? shown.length - 1 : position - 1);
   });
 
   nextButton.addEventListener('click', () => {
-    if (!hits.length) return;
-    focusHit(current >= hits.length - 1 ? 0 : current + 1);
+    if (!shown.length) return;
+    const position = positionOfCurrent();
+    focusAt(position >= shown.length - 1 ? 0 : position + 1);
   });
 
   resetButton.addEventListener('click', () => {
@@ -240,8 +342,71 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   list.addEventListener('click', event => {
     const row = (event.target as HTMLElement).closest('.row') as HTMLElement | null;
     if (!row) return;
-    focusHit(Number(row.dataset.index));
+    const index = Number(row.dataset.index);
+    focusAt(shown.findIndex(hit => hit.index === index));
   });
 
+  addCondition.addEventListener('click', () => {
+    conditions.push({id: nextId++, key: ANY_KEY, op: 'contains', value: ''});
+    conditionsBox.hidden = false;
+    foldConditions.setAttribute('aria-expanded', 'true');
+    renderConditions();
+    applyFilters();
+  });
+
+  foldConditions.addEventListener('click', () => {
+    const open = conditionsBox.hidden;
+    conditionsBox.hidden = !open;
+    foldConditions.setAttribute('aria-expanded', String(open));
+    if (open) renderConditions();
+  });
+
+  foldProps.addEventListener('click', () => {
+    const open = propsBox.hidden;
+    propsBox.hidden = !open;
+    foldProps.setAttribute('aria-expanded', String(open));
+  });
+
+  propFilter.addEventListener('input', () => renderProps());
+
+  conditionsBox.addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest('.cond-remove') as HTMLElement | null;
+    if (!button) return;
+    const id = Number((button.closest('.condition') as HTMLElement).dataset.id);
+    conditions = conditions.filter(condition => condition.id !== id);
+    renderConditions();
+    applyFilters();
+  });
+
+  conditionsBox.addEventListener('change', event => {
+    const target = event.target as HTMLElement;
+    const box = target.closest('.condition') as HTMLElement | null;
+    if (!box) return;
+    const condition = conditions.find(c => c.id === Number(box.dataset.id));
+    if (!condition) return;
+    if (target.classList.contains('cond-key')) condition.key = (target as HTMLSelectElement).value;
+    if (target.classList.contains('cond-op')) {
+      condition.op = (target as HTMLSelectElement).value as Condition['op'];
+      renderConditions();
+    }
+    if (target.classList.contains('cond-value')) condition.value = (target as HTMLInputElement).value;
+    applyFilters();
+  });
+
+  conditionsBox.addEventListener('input', event => {
+    const target = event.target as HTMLElement;
+    if (!target.classList.contains('cond-value')) return;
+    const box = target.closest('.condition') as HTMLElement | null;
+    if (!box) return;
+    const condition = conditions.find(c => c.id === Number(box.dataset.id));
+    if (!condition) return;
+    condition.value = (target as HTMLInputElement).value;
+    applyFilters();
+  });
+
+  // Тема программы может смениться на ходу, поэтому схему цветов проверяем и позже.
+  app.addEventListener('pointerdown', () => applyColorScheme(container, app));
+
+  renderConditions();
   updateButtons();
 }

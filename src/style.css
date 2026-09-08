@@ -15,31 +15,32 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 9px;
+  background: var(--bg);
   font: 13px/1.45 Ubuntu, system-ui, sans-serif;
   color: var(--fg);
 }
 
 .query { display: flex; gap: 6px; }
 
-.query input[type=search] {
-  flex: 1;
+input[type=search], input[type=text], select {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--soft);
   color: inherit;
   font: inherit;
 }
 
-.query input[type=search]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.query input[type=search] { flex: 1; padding: 8px 10px; }
+input[type=search]:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 button {
-  padding: 7px 11px;
+  padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--soft);
   color: inherit;
   font: inherit;
@@ -51,28 +52,35 @@ button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 700; }
 
-.options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); }
+.options { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); }
 .options label { display: inline-flex; align-items: center; gap: 5px; }
 
-.options select, .options input[type=number] {
-  padding: 4px 6px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--soft);
-  color: inherit;
-  font: inherit;
+.block { border: 1px solid var(--line); border-radius: 8px; }
+.block-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.block-head .fold {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: 600;
+  padding: 3px 2px;
 }
+.block-head .fold::before { content: '▾ '; color: var(--muted); }
+.block-head .fold[aria-expanded=false]::before { content: '▸ '; }
+.block-head input[type=search] { width: 120px; }
 
-.options input[type=number] { width: 72px; }
+.conditions { padding: 0 6px 6px; display: flex; flex-direction: column; gap: 5px; }
+.condition { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr) minmax(0, 1fr) auto; gap: 4px; }
+.condition select, .condition input { font-size: 12px; }
 
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bar .spacer { flex: 1; }
-.status { color: var(--muted); min-height: 18px; }
+.status { color: var(--muted); min-height: 17px; }
 .status.error { color: #ff6b6b; }
 
 .list {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 55%;
+  min-height: 90px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -81,7 +89,7 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 .row {
   display: block;
   width: 100%;
-  padding: 7px 9px;
+  padding: 6px 9px;
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -98,5 +106,17 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
 .row .model { color: var(--accent); }
 .row .match { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 11px; word-break: break-all; }
 
-.empty { padding: 18px; color: var(--muted); text-align: center; }
-.hint { color: var(--muted); font-size: 12px; }
+.props-block { display: flex; flex-direction: column; flex: 1 1 45%; min-height: 90px; }
+.props { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 6px; }
+.props-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.props-table th, .props-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.props-table th { width: 42%; font-weight: 500; color: var(--muted); }
+
+.empty { padding: 14px; color: var(--muted); text-align: center; }
+.hint { color: var(--muted); font-size: 11px; }
