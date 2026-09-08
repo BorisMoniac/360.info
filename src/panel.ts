@@ -4,12 +4,24 @@
  * Разметка строится вручную в теневом дереве, чтобы стили плагина не смешивались
  * со стилями программы. Состояние запроса и условий хранится в localStorage.
  */
-import { ANY_KEY, Condition, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
+import { ANY_KEY, Condition, ElementInfo, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
 import { applyConditions, isActive, propertyKeys } from './filter';
+import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, select } from './view';
 
 const STORE_KEY = 'nashepo.info.search.v2';
+
+/** Смонтированные панели. Нужны, чтобы доставлять им выделение из модели. */
+const mounted = new Set<(layers: DwgLayer[]) => void>();
+
+/**
+ * Показать в панелях свойства элемента, выбранного в модели.
+ * Вызывается обработчиком события выделения.
+ */
+export function showSelection(layers: DwgLayer[]): void {
+  for (const listener of mounted) listener(layers);
+}
 
 /** Экранировать текст для вставки в разметку. */
 function esc(value: string): string {
@@ -149,6 +161,8 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   let nextId = 1;
   let current = -1;
   let busy = false;
+  /** Элемент, выбранный прямо в модели. Пока он есть, свойства показываются по нему. */
+  let viewed: ElementInfo | undefined;
 
   function say(text: string, error = false): void {
     status.textContent = text;
@@ -174,10 +188,27 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       conditionsBox.innerHTML = '<div class="empty">Условий нет. Кнопка ＋ добавит условие по свойству.</div>';
       return;
     }
+    // Свойства собираем по группам, чтобы в списке была не одна длинная строка,
+    // а название группы и короткие имена параметров внутри неё.
+    const grouped = new Map<string, {key: string; name: string}[]>();
+    for (const key of keys) {
+      const {group, name} = splitKey(key);
+      const bucket = ['Имя', 'Модель', 'Путь'].includes(key) ? ELEMENT_GROUP : group;
+      const label = bucket === ELEMENT_GROUP ? key : name;
+      const list = grouped.get(bucket);
+      if (list) list.push({key, name: label});
+      else grouped.set(bucket, [{key, name: label}]);
+    }
+
     conditionsBox.innerHTML = conditions.map(condition => {
       const keyOptions = ['<option value="">любое свойство</option>']
-        .concat(keys.map(key =>
-          '<option value="' + esc(key) + '"' + (key === condition.key ? ' selected' : '') + '>' + esc(key) + '</option>'
+        .concat([...grouped.entries()].map(([group, items]) =>
+          '<optgroup label="' + esc(group) + '">' +
+          items.map(item =>
+            '<option value="' + esc(item.key) + '"' + (item.key === condition.key ? ' selected' : '') + '>' +
+            esc(item.name) + '</option>'
+          ).join('') +
+          '</optgroup>'
         )).join('');
       const opOptions = OPERATORS.map(o =>
         '<option value="' + o.op + '"' + (o.op === condition.op ? ' selected' : '') + '>' + o.label + '</option>'
@@ -214,30 +245,40 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   }
 
   function renderProps(): void {
-    const hit = shown.find(h => h.index === current);
-    if (!hit) {
-      propsBox.innerHTML = '<div class="empty">Выберите элемент в списке</div>';
+    const info: ElementInfo | undefined = viewed ?? shown.find(h => h.index === current);
+    if (!info) {
+      propsBox.innerHTML = '<div class="empty">Выберите элемент в списке или в модели</div>';
       return;
     }
+
     const needle = propFilter.value.trim().toLowerCase();
-    const rows: [string, string][] = [
-      ['Имя', hit.name],
-      ['Модель', hit.model],
-      ['Путь', hit.path]
-    ];
-    for (const key of Object.keys(hit.props).sort((a, b) => a.localeCompare(b, 'ru'))) {
-      rows.push([key, hit.props[key]]);
-    }
-    const visible = needle
-      ? rows.filter(([key, value]) => key.toLowerCase().includes(needle) || value.toLowerCase().includes(needle))
-      : rows;
-    if (!visible.length) {
+    const groups = groupProperties(info)
+      .map(group => ({
+        group: group.group,
+        rows: needle
+          ? group.rows.filter(row =>
+            row.name.toLowerCase().includes(needle) ||
+            row.key.toLowerCase().includes(needle) ||
+            row.value.toLowerCase().includes(needle))
+          : group.rows
+      }))
+      .filter(group => group.rows.length);
+
+    if (!groups.length) {
       propsBox.innerHTML = '<div class="empty">Ничего не подходит под фильтр</div>';
       return;
     }
-    propsBox.innerHTML = '<table class="props-table"><tbody>' + visible.map(([key, value]) =>
-      '<tr><th title="' + esc(key) + '">' + esc(key) + '</th><td title="' + esc(value) + '">' + esc(value) + '</td></tr>'
-    ).join('') + '</tbody></table>';
+
+    const note = viewed ? '<div class="props-note">Элемент выбран в модели</div>' : '';
+    propsBox.innerHTML = note + groups.map(group =>
+      '<div class="prop-group">' +
+      '<div class="prop-group-name" title="' + esc(group.group) + '">' + esc(group.group) + '</div>' +
+      '<table class="props-table"><tbody>' + group.rows.map(row =>
+        '<tr><th title="' + esc(row.key) + '">' + esc(row.name) + '</th>' +
+        '<td title="' + esc(row.value) + '">' + esc(row.value) + '</td></tr>'
+      ).join('') + '</tbody></table>' +
+      '</div>'
+    ).join('');
   }
 
   function applyFilters(quiet = false): void {
@@ -256,6 +297,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
 
   function highlight(index: number): void {
     current = index;
+    viewed = undefined;
     list.querySelectorAll('.row').forEach(row => {
       row.classList.toggle('active', Number((row as HTMLElement).dataset.index) === index);
     });
@@ -446,6 +488,32 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
 
     applyFilters();
   });
+
+  /**
+   * Выделение в модели. Если элемент есть среди находок, встаём на его строку,
+   * иначе показываем его свойства отдельно, не трогая список.
+   */
+  const onSelection = (layers: DwgLayer[]): void => {
+    if (!container.isConnected) {
+      mounted.delete(onSelection);
+      return;
+    }
+    if (!layers.length) {
+      if (!viewed) return;
+      viewed = undefined;
+      renderProps();
+      return;
+    }
+    const layer = layers[0];
+    const hit = shown.find(h => h.layer === layer);
+    if (hit) {
+      highlight(hit.index);
+      return;
+    }
+    viewed = describeLayer(layer);
+    renderProps();
+  };
+  mounted.add(onSelection);
 
   // Тема программы может смениться на ходу, поэтому схему цветов проверяем и позже.
   app.addEventListener('pointerdown', () => applyColorScheme(container, app));

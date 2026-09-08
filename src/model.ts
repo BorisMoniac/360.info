@@ -17,22 +17,26 @@ export const defaultOptions = (): SearchOptions => ({
   includeHidden: false
 });
 
+/** Сведения об элементе, достаточные для показа свойств. */
+export interface ElementInfo {
+  /** Имя элемента. */
+  name: string;
+  /** Модель, в которой он лежит. */
+  model: string;
+  /** Путь в дереве слоёв. */
+  path: string;
+  /** Все свойства элемента в плоском виде: ключ и строковое значение. */
+  props: Record<string, string>;
+}
+
 /** Одна находка. */
-export interface Hit {
+export interface Hit extends ElementInfo {
   /** Порядковый номер, он же ключ строки списка. */
   index: number;
   /** Слой, который нужно выделить. */
   layer: DwgLayer;
-  /** Имя элемента. */
-  name: string;
-  /** Модель, в которой он найден. */
-  model: string;
-  /** Путь в дереве слоёв. */
-  path: string;
   /** Где именно совпало. */
   match: string;
-  /** Все свойства элемента в плоском виде: ключ и строковое значение. */
-  props: Record<string, string>;
 }
 
 /** Итог поиска. */

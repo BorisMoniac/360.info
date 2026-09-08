@@ -1,10 +1,10 @@
-import { mountPanel } from './panel';
+import { mountPanel, showSelection } from './panel';
 import { defaultOptions } from './model';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, select } from './view';
 import css from './style.css?inline';
 
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
 const VIEW = 'nashepo.info/search_panel';
 
 /**
@@ -84,5 +84,43 @@ export default {
   /** Снять подсветку. */
   clear(ctx: Context): void {
     clearSelection(live(ctx));
+  },
+
+  /**
+   * Выделение в модели изменилось.
+   *
+   * Программа шлёт это событие при выборе элемента в 3D. Выбранные объекты
+   * лежат в слое чертежа активного вида, а нужный нам слой элемента — в поле
+   * layer каждого объекта. Так же читает выделение и штатная панель свойств.
+   */
+  selection_changed(ctx: Context): void {
+    const view = (ctx.cadview ?? (ctx.manager.activeWindow as CadViewDocumentWindow | undefined)?.context) as
+      CadViewContext | undefined;
+    const drawing = (view?.layer as unknown as {drawing?: SelectionSource} | undefined)?.drawing;
+    if (!drawing?.selectedObjects) {
+      showSelection([]);
+      return;
+    }
+
+    const layers: DwgLayer[] = [];
+    const seen = new Set<DwgLayer>();
+    try {
+      for (const object of drawing.selectedObjects()) {
+        const layer = object?.layer;
+        if (layer && !seen.has(layer)) {
+          seen.add(layer);
+          layers.push(layer);
+        }
+      }
+    } catch {
+      // Вид перестраивается, выделение прочитаем в следующий раз.
+      return;
+    }
+    showSelection(layers);
   }
 };
+
+/** Слой чертежа вида, из которого читается выделение. В типах SDK он не описан. */
+interface SelectionSource {
+  selectedObjects(): Iterable<{layer?: DwgLayer}>;
+}
