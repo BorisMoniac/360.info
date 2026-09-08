@@ -4,6 +4,11 @@
 export interface SearchOptions {
   /** Строка запроса. */
   query: string;
+  /**
+   * Имя параметра, внутри которого искать.
+   * Пустая строка означает поиск по всему: имени, пути, типу и всем свойствам.
+   */
+  property: string;
   /** Учитывать регистр. */
   caseSensitive: boolean;
   /** Искать и в скрытых вложениях. */
@@ -13,6 +18,7 @@ export interface SearchOptions {
 /** Значения по умолчанию. */
 export const defaultOptions = (): SearchOptions => ({
   query: '',
+  property: '',
   caseSensitive: false,
   includeHidden: false
 });

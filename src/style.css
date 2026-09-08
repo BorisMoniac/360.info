@@ -52,6 +52,13 @@ button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 700; }
 
+.scope { display: flex; align-items: center; gap: 6px; }
+.scope-label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.scope input { flex: 1; min-width: 0; }
+.scope button { padding: 5px 9px; }
+.app.scoped .scope input { border-color: var(--accent); }
+.app.scoped .scope-label { color: var(--accent); }
+
 .options { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); }
 .options label { display: inline-flex; align-items: center; gap: 5px; }
 

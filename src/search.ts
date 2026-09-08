@@ -95,6 +95,14 @@ export function flattenProperties(layer: DwgLayer): Record<string, string> {
   return out;
 }
 
+/** Короткое имя параметра: без имени набора и без пути. */
+function shortKey(key: string): string {
+  const pipe = key.indexOf('|');
+  if (pipe > 0) return key.slice(pipe + 1);
+  const dot = key.lastIndexOf('.');
+  return dot > 0 ? key.slice(dot + 1) : key;
+}
+
 /** Найти совпадение в типизированных свойствах слоя. */
 function matchProperties(layer: DwgLayer, needle: string, caseSensitive: boolean): string | undefined {
   const props = flattenProperties(layer);
@@ -107,8 +115,39 @@ function matchProperties(layer: DwgLayer, needle: string, caseSensitive: boolean
   return undefined;
 }
 
+/**
+ * Найти совпадение внутри одного параметра.
+ *
+ * Имя параметра сравнивается и с полным ключом, и с коротким именем, поэтому
+ * годится как «МОГЭ_Геометрические параметры|Длина», так и просто «Длина».
+ * Пустой запрос означает «у элемента этот параметр заполнен».
+ */
+function matchInProperty(
+  layer: DwgLayer,
+  property: string,
+  needle: string,
+  caseSensitive: boolean
+): string | undefined {
+  const props = flattenProperties(layer);
+  for (const key in props) {
+    const full = key.toLowerCase();
+    const short = shortKey(key).toLowerCase();
+    if (!full.includes(property) && !short.includes(property)) continue;
+
+    const value = props[key];
+    if (!needle) return value ? key + ': ' + value : undefined;
+    const haystack = caseSensitive ? value : value.toLowerCase();
+    if (haystack.includes(needle)) return key + ': ' + value;
+  }
+  return undefined;
+}
+
 /** Проверить один слой. Возвращает описание совпадения или undefined. */
-function matchLayer(layer: DwgLayer, needle: string, caseSensitive: boolean): string | undefined {
+function matchLayer(layer: DwgLayer, needle: string, options: SearchOptions): string | undefined {
+  const caseSensitive = options.caseSensitive;
+  const property = options.property.trim().toLowerCase();
+  if (property) return matchInProperty(layer, property, needle, caseSensitive);
+
   const name = layer.name ?? '';
   if ((caseSensitive ? name : name.toLowerCase()).includes(needle)) return 'имя: ' + name;
 
@@ -143,7 +182,8 @@ export async function runSearch(
   const hits: Hit[] = [];
   let scanned = 0;
 
-  if (!needle) return {hits, scanned: 0, models: 0, elapsed: 0};
+  // Без запроса ищем только когда задан параметр: тогда находим всех, у кого он заполнен.
+  if (!needle && !options.property.trim()) return {hits, scanned: 0, models: 0, elapsed: 0};
 
   const sources = sourcesOf(project, options.includeHidden);
 
@@ -160,7 +200,7 @@ export async function runSearch(
         await pause();
       }
 
-      const match = matchLayer(layer, needle, options.caseSensitive);
+      const match = matchLayer(layer, needle, options);
       if (!match) continue;
 
       hits.push({

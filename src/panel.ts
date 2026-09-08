@@ -9,6 +9,7 @@ import { applyConditions, isActive, propertyKeys } from './filter';
 import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, select } from './view';
+import { hideLayers, showAll } from './visibility';
 
 const STORE_KEY = 'nashepo.info.search.v2';
 
@@ -39,6 +40,7 @@ function loadOptions(): SearchOptions {
     const saved = JSON.parse(raw) as Partial<SearchOptions>;
     return {
       query: typeof saved.query === 'string' ? saved.query : base.query,
+      property: typeof saved.property === 'string' ? saved.property : base.property,
       caseSensitive: saved.caseSensitive === true,
       includeHidden: saved.includeHidden === true
     };
@@ -101,6 +103,12 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<input id="query" type="search" placeholder="Значение, имя, GUID, что угодно" value="' + esc(options.query) + '">' +
     '<button class="primary" id="find">Найти</button>' +
     '</div>' +
+    '<div class="scope">' +
+    '<span class="scope-label">в параметре</span>' +
+    '<input id="param" list="param-list" placeholder="любой параметр" value="' + esc(options.property) + '">' +
+    '<datalist id="param-list"></datalist>' +
+    '<button id="param-clear" title="Искать везде">×</button>' +
+    '</div>' +
     '<div class="options">' +
     '<label><input id="case" type="checkbox"> учитывать регистр</label>' +
     '<label><input id="hidden" type="checkbox"> искать в скрытых</label>' +
@@ -119,6 +127,10 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<span class="spacer"></span>' +
     '<button id="reset">Снять</button>' +
     '</div>' +
+    '<div class="bar">' +
+    '<button id="hide" title="Скрыть элементы из списка">Скрыть найденные</button>' +
+    '<button id="show-all" title="Показать всё скрытое в проекте">Показать все</button>' +
+    '</div>' +
     '<div class="status" id="status">Введите значение и нажмите «Найти».</div>' +
 
     '<div class="list" id="list"><div class="empty">Пока ничего не найдено</div></div>' +
@@ -134,6 +146,11 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
 
   const app = root.querySelector('#app') as HTMLElement;
   const queryInput = root.querySelector('#query') as HTMLInputElement;
+  const paramInput = root.querySelector('#param') as HTMLInputElement;
+  const paramList = root.querySelector('#param-list') as HTMLDataListElement;
+  const paramClear = root.querySelector('#param-clear') as HTMLButtonElement;
+  const hideButton = root.querySelector('#hide') as HTMLButtonElement;
+  const showAllButton = root.querySelector('#show-all') as HTMLButtonElement;
   const caseBox = root.querySelector('#case') as HTMLInputElement;
   const hiddenBox = root.querySelector('#hidden') as HTMLInputElement;
   const findButton = root.querySelector('#find') as HTMLButtonElement;
@@ -170,7 +187,12 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   }
 
   function readOptions(): SearchOptions {
-    return {query: queryInput.value, caseSensitive: caseBox.checked, includeHidden: hiddenBox.checked};
+    return {
+      query: queryInput.value,
+      property: paramInput.value,
+      caseSensitive: caseBox.checked,
+      includeHidden: hiddenBox.checked
+    };
   }
 
   function updateButtons(): void {
@@ -178,7 +200,25 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     allButton.disabled = !has || busy;
     prevButton.disabled = !has || busy;
     nextButton.disabled = !has || busy;
+    hideButton.disabled = !has || busy;
     findButton.disabled = busy;
+    showAllButton.disabled = busy;
+    app.classList.toggle('scoped', paramInput.value.trim() !== '');
+  }
+
+  /** Подсказки имён параметров для поля «в параметре». */
+  function updateParamList(): void {
+    const names = new Set<string>();
+    for (const key of propertyKeys(found)) {
+      names.add(key);
+      const short = splitKey(key).name;
+      if (short && short !== key) names.add(short);
+    }
+    paramList.innerHTML = [...names]
+      .sort((a, b) => a.localeCompare(b, 'ru'))
+      .slice(0, 400)
+      .map(name => '<option value="' + esc(name) + '"></option>')
+      .join('');
   }
 
   function renderConditions(): void {
@@ -324,8 +364,8 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     const options = readOptions();
     saveOptions(options);
 
-    if (!options.query.trim()) {
-      say('Введите значение для поиска.', true);
+    if (!options.query.trim() && !options.property.trim()) {
+      say('Введите значение для поиска или укажите параметр.', true);
       return;
     }
 
@@ -351,10 +391,12 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       });
       found = result.hits;
       renderConditions();
+      updateParamList();
       applyFilters(true);
 
       if (!found.length) {
-        say('Ничего не найдено. Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
+        const where = options.property.trim() ? ' Параметр: ' + options.property.trim() + '.' : '';
+        say('Ничего не найдено.' + where + ' Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
       } else {
         const filtered = conditions.filter(isActive).length ? ' После условий отбора: ' + shown.length + '.' : '';
         say('Найдено: ' + found.length + '.' + filtered +
@@ -373,8 +415,62 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   queryInput.addEventListener('keydown', event => {
     if ((event as KeyboardEvent).key === 'Enter') void find();
   });
+  paramInput.addEventListener('keydown', event => {
+    if ((event as KeyboardEvent).key === 'Enter') void find();
+  });
+  paramInput.addEventListener('input', () => {
+    saveOptions(readOptions());
+    updateButtons();
+  });
+  paramClear.addEventListener('click', () => {
+    paramInput.value = '';
+    saveOptions(readOptions());
+    updateButtons();
+    paramInput.focus();
+  });
   caseBox.addEventListener('change', () => saveOptions(readOptions()));
   hiddenBox.addEventListener('change', () => saveOptions(readOptions()));
+
+  hideButton.addEventListener('click', () => {
+    void (async () => {
+      if (!shown.length) return;
+      busy = true;
+      updateButtons();
+      say('Скрываю элементы…');
+      try {
+        const changed = await hideLayers(shown.map(hit => hit.layer));
+        clearSelection(ctx);
+        say('Скрыто элементов: ' + changed + '. Вернуть их можно кнопкой «Показать все».');
+      } catch (e) {
+        say('Не удалось скрыть: ' + ((e as Error)?.message ?? String(e)), true);
+      } finally {
+        busy = false;
+        updateButtons();
+      }
+    })();
+  });
+
+  showAllButton.addEventListener('click', () => {
+    void (async () => {
+      const project = activeProject(ctx);
+      if (!project) {
+        say('Нет открытого проекта.', true);
+        return;
+      }
+      busy = true;
+      updateButtons();
+      say('Показываю скрытое…');
+      try {
+        const changed = await showAll(project);
+        say(changed ? 'Показано элементов: ' + changed + '.' : 'Скрытых элементов не было.');
+      } catch (e) {
+        say('Не удалось показать: ' + ((e as Error)?.message ?? String(e)), true);
+      } finally {
+        busy = false;
+        updateButtons();
+      }
+    })();
+  });
 
   allButton.addEventListener('click', () => {
     if (!shown.length) return;
