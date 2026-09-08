@@ -80,9 +80,15 @@ button.primary { background: var(--accent); color: var(--accent-fg); border-colo
   теме окна, а цвета пунктов задаём явно, иначе в тёмной теме текст сливается с белой
   подложкой и читается только под курсором.
 */
-.theme-dark { --popup-bg: #232323; --popup-fg: #edf1f6; }
-.theme-light { --popup-bg: #ffffff; --popup-fg: #16191e; }
+.theme-dark { --popup-bg: #232323; --popup-fg: #edf1f6; --popup-head: #2f2f2f; }
+.theme-light { --popup-bg: #ffffff; --popup-fg: #16191e; --popup-head: #ececec; }
 option { background-color: var(--popup-bg, #232323); color: var(--popup-fg, #edf1f6); }
+optgroup {
+  background-color: var(--popup-head, #2f2f2f);
+  color: var(--popup-fg, #edf1f6);
+  font-weight: 700;
+  font-style: normal;
+}
 
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bar .spacer { flex: 1; }
