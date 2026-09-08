@@ -1,15 +1,29 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.info",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "НашеПО · Поиск",
   "description": "Сквозной поиск по всем моделям проекта с подсветкой и переходом камеры",
-  "author": {"name": "НашеПО", "url": "https://nashepo.ru/"},
-  "bugs": {"url": "https://t.me/RoburFan"},
-  "repository": {"type": "git", "url": "https://github.com/BorisMoniac/360.info.git"},
+  "author": {
+    "name": "НашеПО",
+    "url": "https://nashepo.ru/"
+  },
+  "bugs": {
+    "url": "https://t.me/RoburFan"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BorisMoniac/360.info.git"
+  },
   "homepage": "https://borismoniac.github.io/360.info/",
   "license": "MIT",
-  "keywords": ["поиск", "IFC", "SMDX", "свойства", "Топоматик 360"],
+  "keywords": [
+    "поиск",
+    "IFC",
+    "SMDX",
+    "свойства",
+    "Топоматик 360"
+  ],
   "main": "src/index.ts",
   "sdk": "^1.4.0",
   "scripts": {
@@ -19,7 +33,10 @@
     "serve": "albatros-cli serve",
     "typecheck": "tsc --noEmit"
   },
-  "devDependencies": {"albatros": "1.4.2", "typescript": "~5.9.3"},
+  "devDependencies": {
+    "albatros": "1.4.2",
+    "typescript": "~5.9.3"
+  },
   "albatros": {
     "actions": {
       "search_open": {
@@ -48,10 +65,18 @@
       {
         "label": "НашеПО",
         "submenu": [
-          {"action": "search_open"},
-          {"action": "search_quick"},
-          {"tag": "s"},
-          {"action": "search_clear"}
+          {
+            "action": "search_open"
+          },
+          {
+            "action": "search_quick"
+          },
+          {
+            "tag": "s"
+          },
+          {
+            "action": "search_clear"
+          }
         ]
       }
     ],
@@ -64,16 +89,29 @@
             "tag": "nashepo_search",
             "label": "Поиск",
             "items": [
-              {"tag": "bt", "action": "search_open"},
-              {"tag": "bt", "action": "search_quick"},
-              {"tag": "b", "action": "search_clear"}
+              {
+                "tag": "bt",
+                "action": "search_open"
+              },
+              {
+                "tag": "bt",
+                "action": "search_quick"
+              },
+              {
+                "tag": "bt",
+                "action": "search_clear"
+              }
             ]
           }
         ]
       }
     ],
     "viewsContainers": {
-      "nashepo": {"label": "НашеПО", "icon": "apps", "container": "left"}
+      "nashepo": {
+        "label": "НашеПО",
+        "icon": "apps",
+        "container": "left"
+      }
     },
     "views": {
       "search_panel": {
