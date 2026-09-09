@@ -54,8 +54,23 @@ function asText(value: unknown): string | undefined {
 }
 
 /**
+ * Служебные поля слоя, которые не относятся к данным модели.
+ *
+ * Их не показывает и штатная панель свойств: она отдельно достаёт имя и
+ * описание, а видимость и заморозку убирает из списка. Здесь тот же набор плюс
+ * оформительские поля слоя, чтобы в условиях отбора не мелькало лишнее.
+ */
+const SERVICE_KEYS = new Set([
+  'hidden', 'disabled', 'unplottable', 'color', 'lineweight', 'linetype',
+  'name', 'layer', 'key', 'uuid', 'modelname'
+]);
+
+/**
  * Развернуть типизированные свойства в плоский словарь.
- * Ключи получают точечный путь, значения приводятся к строке.
+ *
+ * Ключи получают точечный путь, значения приводятся к строке. Служебные поля и
+ * пустые значения пропускаются: параметр, из которого значение убрали при
+ * подготовке модели, в просмотрщике не виден, и здесь его быть не должно.
  */
 export function flattenProperties(layer: DwgLayer): Record<string, string> {
   const out: Record<string, string> = {};
@@ -67,7 +82,7 @@ export function flattenProperties(layer: DwgLayer): Record<string, string> {
 
     const text = asText(value);
     if (text !== undefined) {
-      if (prefix) out[prefix] = text;
+      if (prefix && text !== '') out[prefix] = text;
       return;
     }
     if (Array.isArray(value)) {
@@ -83,6 +98,7 @@ export function flattenProperties(layer: DwgLayer): Record<string, string> {
     }
     for (const key in record) {
       if (key.startsWith('$')) continue;
+      if (depth === 0 && SERVICE_KEYS.has(key.toLowerCase())) continue;
       visit(record[key], prefix ? prefix + '.' + key : key, depth + 1);
     }
   };
@@ -97,7 +113,7 @@ export function flattenProperties(layer: DwgLayer): Record<string, string> {
 
 /** Короткое имя параметра: без имени набора и без пути. */
 function shortKey(key: string): string {
-  const pipe = key.indexOf('|');
+  const pipe = key.lastIndexOf('|');
   if (pipe > 0) return key.slice(pipe + 1);
   const dot = key.lastIndexOf('.');
   return dot > 0 ? key.slice(dot + 1) : key;

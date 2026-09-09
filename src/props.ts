@@ -14,9 +14,12 @@ export const OTHER_GROUP = 'Прочее';
 /** Группа для имени, модели и пути. */
 export const ELEMENT_GROUP = 'Элемент';
 
-/** Разложить ключ свойства на группу и короткое имя. */
+/**
+ * Разложить ключ свойства на группу и короткое имя.
+ * Делим по последней вертикальной черте, как это делает штатная панель свойств.
+ */
 export function splitKey(key: string): {group: string; name: string} {
-  const pipe = key.indexOf('|');
+  const pipe = key.lastIndexOf('|');
   if (pipe > 0) return {group: key.slice(0, pipe), name: key.slice(pipe + 1)};
   const dot = key.lastIndexOf('.');
   if (dot > 0) return {group: key.slice(0, dot), name: key.slice(dot + 1)};
