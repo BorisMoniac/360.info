@@ -89,3 +89,8 @@ export function clear(ctx: Context): boolean {
   view.invalidate();
   return true;
 }
+
+/** Перерисовать вид после изменения видимости. */
+export function refresh(ctx: Context): void {
+  viewOf(ctx)?.invalidate();
+}

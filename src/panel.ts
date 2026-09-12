@@ -8,7 +8,7 @@ import { ANY_KEY, BUILTIN_KEYS, Condition, ElementInfo, Hit, OPERATORS, SearchOp
 import { applyConditions, isActive, propertyKeys, valuesFor } from './filter';
 import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
-import { clear as clearSelection, hasView, select } from './view';
+import { clear as clearSelection, hasView, refresh, select } from './view';
 import { hideLayers, isolate, showAll } from './visibility';
 
 const STORE_KEY = 'nashepo.info.search.v2';
@@ -633,6 +633,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       try {
         const changed = await hideLayers(shown.map(hit => hit.layer));
         clearSelection(ctx);
+        refresh(ctx);
         say('Скрыто элементов: ' + changed + '. Вернуть их можно кнопкой «Показать все».');
       } catch (e) {
         say('Не удалось скрыть: ' + ((e as Error)?.message ?? String(e)), true);
@@ -659,6 +660,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       try {
         const result = await isolate(project, keep);
         select(ctx, keep, true);
+        refresh(ctx);
         say('Изолировано: ' + what + ', элементов ' + keep.length + '. Скрыто веток: ' + result.hidden +
           '. Вернуть вид можно кнопкой показа всего.');
       } catch (e) {
@@ -692,6 +694,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       say('Показываю скрытое…');
       try {
         const changed = await showAll(project);
+        refresh(ctx);
         say(changed ? 'Показано элементов: ' + changed + '.' : 'Скрытых элементов не было.');
       } catch (e) {
         say('Не удалось показать: ' + ((e as Error)?.message ?? String(e)), true);
