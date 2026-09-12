@@ -5,11 +5,11 @@
  * со стилями программы. Состояние запроса и условий хранится в localStorage.
  */
 import { ANY_KEY, Condition, ElementInfo, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
-import { applyConditions, isActive, propertyKeys } from './filter';
+import { applyConditions, isActive, propertyKeys, valuesFor } from './filter';
 import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, select } from './view';
-import { hideLayers, showAll } from './visibility';
+import { hideLayers, isolate, showAll } from './visibility';
 
 const STORE_KEY = 'nashepo.info.search.v2';
 
@@ -22,6 +22,26 @@ const mounted = new Set<(layers: DwgLayer[]) => void>();
  */
 export function showSelection(layers: DwgLayer[]): void {
   for (const listener of mounted) listener(layers);
+}
+
+/**
+ * Значки для кнопок.
+ *
+ * Программа подгружает шрифт Material Symbols, и если он доступен, берём значки
+ * из него — тогда панель выглядит как остальной интерфейс. Если шрифта нет,
+ * подставляем обычные символы, чтобы вместо значка не появилось слово.
+ */
+const iconFont = (() => {
+  try {
+    return document.fonts?.check?.('16px "Material Symbols Outlined"') === true;
+  } catch {
+    return false;
+  }
+})();
+
+/** Разметка значка: имя из Material Symbols и запасной символ. */
+function icon(name: string, fallback: string): string {
+  return iconFont ? '<span class="ic">' + name + '</span>' : '<span class="ic-text">' + fallback + '</span>';
 }
 
 /** Экранировать текст для вставки в разметку. */
@@ -120,16 +140,16 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<div class="conditions" id="conditions" hidden></div>' +
     '</section>' +
 
-    '<div class="bar">' +
-    '<button id="all">Подсветить все</button>' +
-    '<button id="prev" title="Предыдущий элемент">←</button>' +
-    '<button id="next" title="Следующий элемент">→</button>' +
-    '<span class="spacer"></span>' +
-    '<button id="reset">Снять</button>' +
-    '</div>' +
-    '<div class="bar">' +
-    '<button id="hide" title="Скрыть элементы из списка">Скрыть найденные</button>' +
-    '<button id="show-all" title="Показать всё скрытое в проекте">Показать все</button>' +
+    '<div class="toolbar">' +
+    '<button id="prev" class="ib" title="Предыдущий элемент">' + icon('chevron_left', '‹') + '</button>' +
+    '<button id="next" class="ib" title="Следующий элемент">' + icon('chevron_right', '›') + '</button>' +
+    '<button id="all" class="ib" title="Подсветить все найденные">' + icon('select_all', '▣') + '</button>' +
+    '<button id="reset" class="ib" title="Снять подсветку">' + icon('deselect', '✕') + '</button>' +
+    '<span class="sep"></span>' +
+    '<button id="isolate" class="ib" title="Изолировать: оставить видимым только выбранный элемент, а если он не выбран — весь список">' +
+    icon('center_focus_strong', '⊙') + '</button>' +
+    '<button id="hide" class="ib" title="Скрыть элементы из списка">' + icon('visibility_off', '⊘') + '</button>' +
+    '<button id="show-all" class="ib" title="Показать всё скрытое в проекте">' + icon('visibility', '◎') + '</button>' +
     '</div>' +
     '<div class="status" id="status">Введите значение и нажмите «Найти».</div>' +
 
@@ -151,6 +171,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   const paramClear = root.querySelector('#param-clear') as HTMLButtonElement;
   const hideButton = root.querySelector('#hide') as HTMLButtonElement;
   const showAllButton = root.querySelector('#show-all') as HTMLButtonElement;
+  const isolateButton = root.querySelector('#isolate') as HTMLButtonElement;
   const caseBox = root.querySelector('#case') as HTMLInputElement;
   const hiddenBox = root.querySelector('#hidden') as HTMLInputElement;
   const findButton = root.querySelector('#find') as HTMLButtonElement;
@@ -201,6 +222,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     prevButton.disabled = !has || busy;
     nextButton.disabled = !has || busy;
     hideButton.disabled = !has || busy;
+    isolateButton.disabled = !has || busy;
     findButton.disabled = busy;
     showAllButton.disabled = busy;
     app.classList.toggle('scoped', paramInput.value.trim() !== '');
@@ -259,12 +281,25 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       const hint = waiting
         ? (numeric && condition.value.trim() !== '' ? 'нужно число' : 'введите значение')
         : '';
+      // Подсказка значений: что это свойство принимает у найденных элементов.
+      const values = needsValue ? valuesFor(found, condition.key) : [];
+      const listId = 'cond-values-' + condition.id;
+      const valueList = values.length
+        ? '<datalist id="' + listId + '">' +
+          values.map(value => '<option value="' + esc(value) + '"></option>').join('') +
+          '</datalist>'
+        : '';
+      const placeholder = numeric ? 'число' : values.length ? 'значение или часть' : 'значение';
+
       return '<div class="condition' + (waiting ? ' waiting' : '') + '" data-id="' + condition.id + '">' +
         '<select class="cond-key">' + keyOptions + '</select>' +
         '<select class="cond-op">' + opOptions + '</select>' +
-        '<input class="cond-value" type="search" placeholder="' + (numeric ? 'число' : 'значение') + '" value="' +
-        esc(condition.value) + '"' + (needsValue ? '' : ' disabled') + '>' +
+        '<input class="cond-value" type="search" placeholder="' + placeholder + '" value="' +
+        esc(condition.value) + '"' + (needsValue ? '' : ' disabled') +
+        (values.length ? ' list="' + listId + '"' : '') + '>' +
         '<button class="cond-remove" title="Удалить условие">×</button>' +
+        valueList +
+        (values.length ? '<div class="cond-hint">известных значений: ' + values.length + '</div>' : '') +
         (hint ? '<div class="cond-hint">' + hint + ', условие пока не применяется</div>' : '') +
         '</div>';
     }).join('');
@@ -450,6 +485,34 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     })();
   });
 
+  isolateButton.addEventListener('click', () => {
+    void (async () => {
+      const project = activeProject(ctx);
+      if (!project) {
+        say('Нет открытого проекта.', true);
+        return;
+      }
+      const active = shown.find(hit => hit.index === current);
+      const keep = active ? [active.layer] : shown.map(hit => hit.layer);
+      if (!keep.length) return;
+
+      busy = true;
+      updateButtons();
+      say('Изолирую…');
+      try {
+        const result = await isolate(project, keep);
+        select(ctx, keep, true);
+        say('Изолировано элементов: ' + keep.length + '. Скрыто веток: ' + result.hidden +
+          '. Вернуть вид можно кнопкой показа всего.');
+      } catch (e) {
+        say('Не удалось изолировать: ' + ((e as Error)?.message ?? String(e)), true);
+      } finally {
+        busy = false;
+        updateButtons();
+      }
+    })();
+  });
+
   showAllButton.addEventListener('click', () => {
     void (async () => {
       const project = activeProject(ctx);
@@ -547,7 +610,11 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     if (!box) return;
     const condition = conditions.find(c => c.id === Number(box.dataset.id));
     if (!condition) return;
-    if (target.classList.contains('cond-key')) condition.key = (target as HTMLSelectElement).value;
+    if (target.classList.contains('cond-key')) {
+      condition.key = (target as HTMLSelectElement).value;
+      // Свойство сменилось, значит подсказка значений теперь другая.
+      renderConditions();
+    }
     if (target.classList.contains('cond-op')) {
       condition.op = (target as HTMLSelectElement).value as Condition['op'];
       renderConditions();

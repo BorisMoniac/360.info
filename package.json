@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/albatros/schema.json",
   "name": "nashepo.info",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "displayName": "НашеПО · Поиск",
   "description": "Сквозной поиск по всем моделям проекта с подсветкой и переходом камеры",
   "author": {

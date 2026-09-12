@@ -99,6 +99,47 @@ optgroup {
 
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bar .spacer { flex: 1; }
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.toolbar .sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--line);
+}
+
+button.ib {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+button.ib:hover:not(:disabled) { background: var(--soft); border-color: var(--line); }
+button.ib:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+.ic {
+  font-family: 'Material Symbols Outlined';
+  font-size: 19px;
+  line-height: 1;
+  font-weight: 300;
+  -webkit-font-feature-settings: 'liga';
+  font-variant-ligatures: common-ligatures;
+}
+
+.ic-text { font-size: 15px; line-height: 1; }
 .status { color: var(--muted); min-height: 17px; }
 .status.error { color: #ff6b6b; }
 

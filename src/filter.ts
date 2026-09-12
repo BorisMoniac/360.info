@@ -104,3 +104,27 @@ export function propertyKeys(hits: Hit[]): string[] {
   const sorted = [...keys].sort((a, b) => a.localeCompare(b, 'ru'));
   return [...BUILTIN_KEYS, ...sorted];
 }
+
+/** Сколько разных значений предлагать в подсказке. */
+const MAX_VALUES = 400;
+
+/**
+ * Значения, которые это свойство принимает у найденных элементов.
+ * Нужны для подсказки в поле значения условия: выбрать готовое или дописать своё.
+ */
+export function valuesFor(hits: Hit[], key: string): string[] {
+  if (key === ANY_KEY) return [];
+  const values = new Set<string>();
+  for (const hit of hits) {
+    const value = valueOf(hit, key);
+    if (value === undefined || value === '') continue;
+    values.add(value);
+    if (values.size >= MAX_VALUES) break;
+  }
+  return [...values].sort((a, b) => {
+    const x = toNumber(a);
+    const y = toNumber(b);
+    if (Number.isFinite(x) && Number.isFinite(y) && x !== y) return x - y;
+    return a.localeCompare(b, 'ru');
+  });
+}
