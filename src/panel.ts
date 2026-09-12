@@ -485,6 +485,49 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     return shown.findIndex(hit => hit.index === current);
   }
 
+  /**
+   * Подсказать, где значение лежит на самом деле.
+   *
+   * Частая путаница: элемент называется одним, а привычное слово хранится в
+   * свойстве. Например «Люк» встречается не в имени, а в параметре «Тип люка».
+   * Поэтому при пустом результате повторяем поиск по всему и показываем, в каких
+   * параметрах значение нашлось.
+   */
+  async function suggestWhere(
+    project: Drawing,
+    options: SearchOptions,
+    scope: string,
+    scanned: number
+  ): Promise<void> {
+    say('В параметре «' + scope + '» ничего нет, смотрю остальные…');
+    const wide = await runSearch(project, {...options, property: ''});
+    if (!wide.hits.length) {
+      say('Ничего не найдено ни в параметре «' + scope + '», ни в остальных. Просмотрено слоёв: ' + scanned + '.');
+      return;
+    }
+
+    const needle = options.caseSensitive ? options.query.trim() : options.query.trim().toLowerCase();
+    const counts = new Map<string, number>();
+    for (const hit of wide.hits) {
+      const seen = new Set<string>();
+      const check = (key: string, value: string): void => {
+        const haystack = options.caseSensitive ? value : value.toLowerCase();
+        if (value && haystack.includes(needle)) seen.add(key);
+      };
+      check('Имя', hit.name);
+      check('Путь', hit.path);
+      for (const key in hit.props) check(key, hit.props[key]);
+      for (const key of seen) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const where = top.length
+      ? ' Значение встречается в: ' + top.map(([key, count]) => '«' + key + '» (' + count + ')').join(', ') + '.'
+      : '';
+    say('В параметре «' + scope + '» ничего нет, но по всем свойствам нашлось ' + wide.hits.length + '.' + where +
+      ' Крестик справа от выбора параметра вернёт поиск везде.');
+  }
+
   async function find(): Promise<void> {
     const options = readOptions();
     saveOptions(options);
@@ -520,8 +563,12 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       applyFilters(true);
 
       if (!found.length) {
-        const where = options.property.trim() ? ' Параметр: ' + options.property.trim() + '.' : '';
-        say('Ничего не найдено.' + where + ' Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
+        const scope = options.property.trim();
+        if (scope && options.query.trim()) {
+          await suggestWhere(project, options, scope, result.scanned);
+        } else {
+          say('Ничего не найдено. Просмотрено слоёв: ' + result.scanned + ' в моделях: ' + result.models + '.');
+        }
       } else {
         const filtered = conditions.filter(isActive).length ? ' После условий отбора: ' + shown.length + '.' : '';
         say('Найдено: ' + found.length + '.' + filtered +

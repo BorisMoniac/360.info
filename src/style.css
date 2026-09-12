@@ -10,6 +10,14 @@
 
 * { box-sizing: border-box; }
 
+/*
+  Атрибут hidden прячет элемент правилом display:none из таблицы браузера, а оно
+  слабее любого своего правила display. Блоки с display:flex из-за этого никогда
+  не скрывались: выпадающий выбор параметра висел поверх панели и закрывал кнопку
+  поиска. Поэтому hidden задан явно и с приоритетом.
+*/
+[hidden] { display: none !important; }
+
 .app {
   display: flex;
   flex-direction: column;
