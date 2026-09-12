@@ -4,7 +4,7 @@
  * Разметка строится вручную в теневом дереве, чтобы стили плагина не смешивались
  * со стилями программы. Состояние запроса и условий хранится в localStorage.
  */
-import { ANY_KEY, Condition, ElementInfo, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
+import { ANY_KEY, BUILTIN_KEYS, Condition, ElementInfo, Hit, OPERATORS, SearchOptions, defaultOptions } from './model';
 import { applyConditions, isActive, propertyKeys, valuesFor } from './filter';
 import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
@@ -12,6 +12,7 @@ import { clear as clearSelection, hasView, select } from './view';
 import { hideLayers, isolate, showAll } from './visibility';
 
 const STORE_KEY = 'nashepo.info.search.v2';
+const KEYS_KEY = 'nashepo.info.keys.v1';
 
 /** Смонтированные панели. Нужны, чтобы доставлять им выделение из модели. */
 const mounted = new Set<(layers: DwgLayer[]) => void>();
@@ -78,6 +79,26 @@ function saveOptions(options: SearchOptions): void {
   }
 }
 
+/** Имена параметров из прошлых поисков. */
+function loadKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(KEYS_KEY);
+    const saved = raw ? JSON.parse(raw) : undefined;
+    return Array.isArray(saved) ? saved.filter(item => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Запомнить имена параметров. */
+function saveKeys(keys: string[]): void {
+  try {
+    localStorage.setItem(KEYS_KEY, JSON.stringify(keys));
+  } catch {
+    // Не беда, просто список не переживёт перезапуск.
+  }
+}
+
 /**
  * Определить, светлая тема у программы или тёмная.
  *
@@ -124,10 +145,18 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<button class="primary" id="find">Найти</button>' +
     '</div>' +
     '<div class="scope">' +
-    '<span class="scope-label">в параметре</span>' +
-    '<input id="param" list="param-list" placeholder="любой параметр" value="' + esc(options.property) + '">' +
-    '<datalist id="param-list"></datalist>' +
-    '<button id="param-clear" title="Искать везде">×</button>' +
+    '<span class="scope-label">искать</span>' +
+    '<div class="picker">' +
+    '<button id="param-button" class="picker-button" aria-expanded="false" title="Где искать">' +
+    '<span id="param-label" class="picker-value">везде</span>' + icon('expand_more', '▾') +
+    '</button>' +
+    '<div id="param-popup" class="picker-popup" hidden>' +
+    '<input id="param-filter" type="search" placeholder="параметр или его часть">' +
+    '<div id="param-options" class="picker-list"></div>' +
+    '<div class="picker-foot">Enter — искать в том, что набрано</div>' +
+    '</div>' +
+    '</div>' +
+    '<button id="param-clear" class="ib" title="Искать везде, по всем свойствам">' + icon('close', '✕') + '</button>' +
     '</div>' +
     '<div class="options">' +
     '<label><input id="case" type="checkbox"> учитывать регистр</label>' +
@@ -146,7 +175,9 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     '<button id="all" class="ib" title="Подсветить все найденные">' + icon('select_all', '▣') + '</button>' +
     '<button id="reset" class="ib" title="Снять подсветку">' + icon('deselect', '✕') + '</button>' +
     '<span class="sep"></span>' +
-    '<button id="isolate" class="ib" title="Изолировать: оставить видимым только выбранный элемент, а если он не выбран — весь список">' +
+    '<button id="isolate-found" class="ib" title="Изолировать найденные: оставить видимым только список">' +
+    icon('filter_center_focus', '⊡') + '</button>' +
+    '<button id="isolate-selected" class="ib" title="Изолировать выбранный элемент">' +
     icon('center_focus_strong', '⊙') + '</button>' +
     '<button id="hide" class="ib" title="Скрыть элементы из списка">' + icon('visibility_off', '⊘') + '</button>' +
     '<button id="show-all" class="ib" title="Показать всё скрытое в проекте">' + icon('visibility', '◎') + '</button>' +
@@ -166,12 +197,16 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
 
   const app = root.querySelector('#app') as HTMLElement;
   const queryInput = root.querySelector('#query') as HTMLInputElement;
-  const paramInput = root.querySelector('#param') as HTMLInputElement;
-  const paramList = root.querySelector('#param-list') as HTMLDataListElement;
+  const paramButton = root.querySelector('#param-button') as HTMLButtonElement;
+  const paramLabel = root.querySelector('#param-label') as HTMLElement;
+  const paramPopup = root.querySelector('#param-popup') as HTMLElement;
+  const paramFilter = root.querySelector('#param-filter') as HTMLInputElement;
+  const paramOptions = root.querySelector('#param-options') as HTMLElement;
   const paramClear = root.querySelector('#param-clear') as HTMLButtonElement;
   const hideButton = root.querySelector('#hide') as HTMLButtonElement;
   const showAllButton = root.querySelector('#show-all') as HTMLButtonElement;
-  const isolateButton = root.querySelector('#isolate') as HTMLButtonElement;
+  const isolateFoundButton = root.querySelector('#isolate-found') as HTMLButtonElement;
+  const isolateSelectedButton = root.querySelector('#isolate-selected') as HTMLButtonElement;
   const caseBox = root.querySelector('#case') as HTMLInputElement;
   const hiddenBox = root.querySelector('#hidden') as HTMLInputElement;
   const findButton = root.querySelector('#find') as HTMLButtonElement;
@@ -201,6 +236,10 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   let busy = false;
   /** Элемент, выбранный прямо в модели. Пока он есть, свойства показываются по нему. */
   let viewed: ElementInfo | undefined;
+  /** Параметр, внутри которого идёт поиск. Пустая строка — искать везде. */
+  let property = options.property;
+  /** Имена параметров для выбора. Переживают перезапуск, чтобы список был доступен сразу. */
+  let knownKeys: string[] = loadKeys();
 
   function say(text: string, error = false): void {
     status.textContent = text;
@@ -210,7 +249,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   function readOptions(): SearchOptions {
     return {
       query: queryInput.value,
-      property: paramInput.value,
+      property,
       caseSensitive: caseBox.checked,
       includeHidden: hiddenBox.checked
     };
@@ -218,29 +257,79 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
 
   function updateButtons(): void {
     const has = shown.length > 0;
+    const active = current >= 0 && shown.some(hit => hit.index === current);
     allButton.disabled = !has || busy;
     prevButton.disabled = !has || busy;
     nextButton.disabled = !has || busy;
     hideButton.disabled = !has || busy;
-    isolateButton.disabled = !has || busy;
+    isolateFoundButton.disabled = !has || busy;
+    isolateSelectedButton.disabled = !active || busy;
     findButton.disabled = busy;
     showAllButton.disabled = busy;
-    app.classList.toggle('scoped', paramInput.value.trim() !== '');
+    app.classList.toggle('scoped', property.trim() !== '');
+    paramLabel.textContent = property.trim() || 'везде';
+    paramButton.title = property.trim() ? 'Искать в параметре: ' + property : 'Искать везде, по всем свойствам';
   }
 
-  /** Подсказки имён параметров для поля «в параметре». */
-  function updateParamList(): void {
-    const names = new Set<string>();
-    for (const key of propertyKeys(found)) {
-      names.add(key);
-      const short = splitKey(key).name;
-      if (short && short !== key) names.add(short);
+  /** Запомнить имена параметров из находок, чтобы список был доступен и в следующий раз. */
+  function rememberKeys(): void {
+    const names = new Set(knownKeys);
+    for (const key of propertyKeys(found)) names.add(key);
+    knownKeys = [...names].sort((a, b) => a.localeCompare(b, 'ru')).slice(0, 1500);
+    saveKeys(knownKeys);
+  }
+
+  /** Нарисовать список параметров в выпадающем окне. */
+  function renderParamOptions(): void {
+    const needle = paramFilter.value.trim().toLowerCase();
+    const matched = knownKeys.filter(key => !needle || key.toLowerCase().includes(needle));
+
+    const groups = new Map<string, string[]>();
+    for (const key of matched) {
+      const bucket = BUILTIN_KEYS.includes(key) ? ELEMENT_GROUP : splitKey(key).group;
+      const list = groups.get(bucket);
+      if (list) list.push(key);
+      else groups.set(bucket, [key]);
     }
-    paramList.innerHTML = [...names]
-      .sort((a, b) => a.localeCompare(b, 'ru'))
-      .slice(0, 400)
-      .map(name => '<option value="' + esc(name) + '"></option>')
-      .join('');
+
+    const head = '<button class="picker-item' + (property.trim() ? '' : ' active') + '" data-key="">' +
+      'везде, по всем свойствам</button>';
+
+    if (!matched.length) {
+      paramOptions.innerHTML = head +
+        '<div class="empty">' +
+        (knownKeys.length ? 'Ничего не подходит. Enter — искать в том, что набрано.'
+          : 'Список появится после первого поиска. Имя параметра можно набрать и вручную.') +
+        '</div>';
+      return;
+    }
+
+    paramOptions.innerHTML = head + [...groups.entries()].map(([group, keys]) =>
+      '<div class="picker-group">' + esc(group) + '</div>' +
+      keys.map(key =>
+        '<button class="picker-item' + (key === property ? ' active' : '') + '" data-key="' + esc(key) + '" title="' +
+        esc(key) + '">' + esc(BUILTIN_KEYS.includes(key) ? key : splitKey(key).name) + '</button>'
+      ).join('')
+    ).join('');
+  }
+
+  /** Открыть или закрыть выбор параметра. */
+  function toggleParam(open: boolean): void {
+    paramPopup.hidden = !open;
+    paramButton.setAttribute('aria-expanded', String(open));
+    if (open) {
+      paramFilter.value = '';
+      renderParamOptions();
+      paramFilter.focus();
+    }
+  }
+
+  /** Применить выбранный параметр. */
+  function applyParam(value: string): void {
+    property = value;
+    saveOptions(readOptions());
+    updateButtons();
+    toggleParam(false);
   }
 
   function renderConditions(): void {
@@ -378,6 +467,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     });
     (list.querySelector('.row.active') as HTMLElement | null)?.scrollIntoView({block: 'nearest'});
     renderProps();
+    updateButtons();
   }
 
   function focusAt(position: number): void {
@@ -426,7 +516,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       });
       found = result.hits;
       renderConditions();
-      updateParamList();
+      rememberKeys();
       applyFilters(true);
 
       if (!found.length) {
@@ -450,18 +540,39 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   queryInput.addEventListener('keydown', event => {
     if ((event as KeyboardEvent).key === 'Enter') void find();
   });
-  paramInput.addEventListener('keydown', event => {
-    if ((event as KeyboardEvent).key === 'Enter') void find();
+  paramButton.addEventListener('click', () => toggleParam(paramPopup.hidden));
+
+  paramFilter.addEventListener('input', () => renderParamOptions());
+  paramFilter.addEventListener('keydown', event => {
+    const key = (event as KeyboardEvent).key;
+    if (key === 'Escape') {
+      toggleParam(false);
+      return;
+    }
+    if (key !== 'Enter') return;
+    // Введённое вручную имя применяется как есть: годится и часть имени.
+    const typed = paramFilter.value.trim();
+    applyParam(typed);
+    void find();
   });
-  paramInput.addEventListener('input', () => {
-    saveOptions(readOptions());
-    updateButtons();
+
+  paramOptions.addEventListener('click', event => {
+    const item = (event.target as HTMLElement).closest('.picker-item') as HTMLElement | null;
+    if (!item) return;
+    applyParam(item.dataset.key ?? '');
+    void find();
   });
+
   paramClear.addEventListener('click', () => {
-    paramInput.value = '';
-    saveOptions(readOptions());
-    updateButtons();
-    paramInput.focus();
+    applyParam('');
+  });
+
+  // Щелчок мимо закрывает выбор параметра.
+  app.addEventListener('pointerdown', event => {
+    if (paramPopup.hidden) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('.picker') || target.closest('#param-clear')) return;
+    toggleParam(false);
   });
   caseBox.addEventListener('change', () => saveOptions(readOptions()));
   hiddenBox.addEventListener('change', () => saveOptions(readOptions()));
@@ -485,15 +596,14 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
     })();
   });
 
-  isolateButton.addEventListener('click', () => {
+  /** Оставить видимыми только переданные элементы. */
+  function runIsolate(keep: DwgLayer[], what: string): void {
     void (async () => {
       const project = activeProject(ctx);
       if (!project) {
         say('Нет открытого проекта.', true);
         return;
       }
-      const active = shown.find(hit => hit.index === current);
-      const keep = active ? [active.layer] : shown.map(hit => hit.layer);
       if (!keep.length) return;
 
       busy = true;
@@ -502,7 +612,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       try {
         const result = await isolate(project, keep);
         select(ctx, keep, true);
-        say('Изолировано элементов: ' + keep.length + '. Скрыто веток: ' + result.hidden +
+        say('Изолировано: ' + what + ', элементов ' + keep.length + '. Скрыто веток: ' + result.hidden +
           '. Вернуть вид можно кнопкой показа всего.');
       } catch (e) {
         say('Не удалось изолировать: ' + ((e as Error)?.message ?? String(e)), true);
@@ -511,6 +621,16 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
         updateButtons();
       }
     })();
+  }
+
+  isolateFoundButton.addEventListener('click', () => {
+    runIsolate(shown.map(hit => hit.layer), 'найденные');
+  });
+
+  isolateSelectedButton.addEventListener('click', () => {
+    const active = shown.find(hit => hit.index === current);
+    if (!active) return;
+    runIsolate([active.layer], 'выбранный элемент');
   });
 
   showAllButton.addEventListener('click', () => {

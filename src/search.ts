@@ -132,6 +132,27 @@ function matchProperties(layer: DwgLayer, needle: string, caseSensitive: boolean
 }
 
 /**
+ * Собственные поля элемента: имя, путь, модель и тип.
+ *
+ * В свойствах модели их нет, это поля самого слоя. Но в списке параметров они
+ * предлагаются наравне с остальными, поэтому поиск по параметру обязан их знать.
+ */
+function basicsOf(layer: DwgLayer, model: string): [string, string][] {
+  let typeName = '';
+  try {
+    typeName = layer.typed?.name ?? '';
+  } catch {
+    typeName = '';
+  }
+  return [
+    ['Имя', layer.name ?? ''],
+    ['Модель', model],
+    ['Путь', layer.$path ?? ''],
+    ['Тип', typeName]
+  ];
+}
+
+/**
  * Найти совпадение внутри одного параметра.
  *
  * Имя параметра сравнивается и с полным ключом, и с коротким именем, поэтому
@@ -142,8 +163,19 @@ function matchInProperty(
   layer: DwgLayer,
   property: string,
   needle: string,
-  caseSensitive: boolean
+  caseSensitive: boolean,
+  model: string
 ): string | undefined {
+  for (const [label, value] of basicsOf(layer, model)) {
+    if (!label.toLowerCase().includes(property)) continue;
+    if (!needle) {
+      if (value) return label + ': ' + value;
+      continue;
+    }
+    const haystack = caseSensitive ? value : value.toLowerCase();
+    if (haystack.includes(needle)) return label + ': ' + value;
+  }
+
   const props = flattenProperties(layer);
   for (const key in props) {
     const full = key.toLowerCase();
@@ -159,10 +191,10 @@ function matchInProperty(
 }
 
 /** Проверить один слой. Возвращает описание совпадения или undefined. */
-function matchLayer(layer: DwgLayer, needle: string, options: SearchOptions): string | undefined {
+function matchLayer(layer: DwgLayer, needle: string, options: SearchOptions, model: string): string | undefined {
   const caseSensitive = options.caseSensitive;
   const property = options.property.trim().toLowerCase();
-  if (property) return matchInProperty(layer, property, needle, caseSensitive);
+  if (property) return matchInProperty(layer, property, needle, caseSensitive, model);
 
   const name = layer.name ?? '';
   if ((caseSensitive ? name : name.toLowerCase()).includes(needle)) return 'имя: ' + name;
@@ -216,7 +248,7 @@ export async function runSearch(
         await pause();
       }
 
-      const match = matchLayer(layer, needle, options);
+      const match = matchLayer(layer, needle, options, source.title);
       if (!match) continue;
 
       hits.push({
