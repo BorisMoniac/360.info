@@ -9,7 +9,7 @@ import { applyConditions, isActive, propertyKeys, valuesFor } from './filter';
 import { ELEMENT_GROUP, describeLayer, groupProperties, splitKey } from './props';
 import { activeProject, runSearch } from './search';
 import { clear as clearSelection, hasView, refresh, select } from './view';
-import { hideLayers, isolate, showAll } from './visibility';
+import { hideLayers, isVisible, isolate, showAll, showLayers } from './visibility';
 
 const STORE_KEY = 'nashepo.info.search.v2';
 const KEYS_KEY = 'nashepo.info.keys.v1';
@@ -399,13 +399,20 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       list.innerHTML = '<div class="empty">' + (found.length ? 'Условия отбора не пропустили ни одного элемента' : 'Пока ничего не найдено') + '</div>';
       return;
     }
-    list.innerHTML = shown.map(hit =>
-      '<button class="row" data-index="' + hit.index + '">' +
-      '<div class="name">' + esc(hit.name) + '</div>' +
-      '<div class="meta"><span class="model">' + esc(hit.model) + '</span><span>' + esc(hit.path) + '</span></div>' +
-      '<div class="match">' + esc(hit.match) + '</div>' +
-      '</button>'
-    ).join('');
+    list.innerHTML = shown.map(hit => {
+      const visible = isVisible(hit.layer);
+      return '<div class="row' + (visible ? '' : ' dimmed') + '" data-index="' + hit.index + '">' +
+        '<button class="row-main" data-index="' + hit.index + '">' +
+        '<div class="name">' + esc(hit.name) + '</div>' +
+        '<div class="meta"><span class="model">' + esc(hit.model) + '</span><span>' + esc(hit.path) + '</span></div>' +
+        '<div class="match">' + esc(hit.match) + '</div>' +
+        '</button>' +
+        '<button class="row-eye ib" data-index="' + hit.index + '" title="' +
+        (visible ? 'Виден. Нажмите, чтобы скрыть' : 'Скрыт. Нажмите, чтобы показать') + '">' +
+        (visible ? icon('lightbulb', '◉') : icon('light_off', '○')) +
+        '</button>' +
+        '</div>';
+    }).join('');
   }
 
   function renderProps(): void {
@@ -634,6 +641,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
         const changed = await hideLayers(shown.map(hit => hit.layer));
         clearSelection(ctx);
         refresh(ctx);
+        renderList();
         say('Скрыто элементов: ' + changed + '. Вернуть их можно кнопкой «Показать все».');
       } catch (e) {
         say('Не удалось скрыть: ' + ((e as Error)?.message ?? String(e)), true);
@@ -661,6 +669,8 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
         const result = await isolate(project, keep);
         select(ctx, keep, true);
         refresh(ctx);
+        renderList();
+        highlight(current);
         say('Изолировано: ' + what + ', элементов ' + keep.length + '. Скрыто веток: ' + result.hidden +
           '. Вернуть вид можно кнопкой показа всего.');
       } catch (e) {
@@ -695,6 +705,7 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
       try {
         const changed = await showAll(project);
         refresh(ctx);
+        renderList();
         say(changed ? 'Показано элементов: ' + changed + '.' : 'Скрытых элементов не было.');
       } catch (e) {
         say('Не удалось показать: ' + ((e as Error)?.message ?? String(e)), true);
@@ -736,7 +747,29 @@ export function mountPanel(container: HTMLElement, ctx: Context, css: string, ve
   });
 
   list.addEventListener('click', event => {
-    const row = (event.target as HTMLElement).closest('.row') as HTMLElement | null;
+    const target = event.target as HTMLElement;
+
+    // Лампочка в строке переключает видимость этого элемента.
+    const eye = target.closest('.row-eye') as HTMLElement | null;
+    if (eye) {
+      const hit = shown.find(item => item.index === Number(eye.dataset.index));
+      if (!hit) return;
+      void (async () => {
+        try {
+          if (isVisible(hit.layer)) await hideLayers([hit.layer]);
+          else await showLayers([hit.layer]);
+          refresh(ctx);
+          renderList();
+          highlight(current);
+          say(isVisible(hit.layer) ? 'Элемент показан: ' + hit.name : 'Элемент скрыт: ' + hit.name);
+        } catch (e) {
+          say('Не удалось изменить видимость: ' + ((e as Error)?.message ?? String(e)), true);
+        }
+      })();
+      return;
+    }
+
+    const row = target.closest('.row') as HTMLElement | null;
     if (!row) return;
     const index = Number(row.dataset.index);
     focusAt(shown.findIndex(hit => hit.index === index));

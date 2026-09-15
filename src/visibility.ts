@@ -86,6 +86,38 @@ export async function isolate(project: Drawing, keep: DwgLayer[]): Promise<{visi
   return {visible, hidden};
 }
 
+/**
+ * Показать слои.
+ *
+ * Снимаем скрытие не только с самих элементов и их содержимого, но и с предков:
+ * скрытый родитель гасит всё внутри, и без этого элемент остался бы невидимым.
+ * Так же поступает дерево проекта при включении лампочки.
+ */
+export async function showLayers(layers: DwgLayer[]): Promise<number> {
+  const targets = new Set<DwgLayer>();
+  for (const layer of layers) {
+    for (const item of withChildren(layer)) targets.add(item);
+    let parent = layer.layer;
+    for (let depth = 0; parent && depth < 64; depth++) {
+      targets.add(parent);
+      parent = parent.layer;
+    }
+  }
+
+  let changed = 0;
+  for (const layer of targets) if (setHidden(layer, false)) changed++;
+  return changed;
+}
+
+/** Виден ли элемент с учётом скрытых родителей. */
+export function isVisible(layer: DwgLayer): boolean {
+  try {
+    return !layer.resolveHidden();
+  } catch {
+    return true;
+  }
+}
+
 /** Показать всё скрытое в проекте и во всех загруженных вложениях. */
 export async function showAll(project: Drawing): Promise<number> {
   let changed = 0;

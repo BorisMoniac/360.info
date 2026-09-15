@@ -214,20 +214,37 @@ button.ib:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 2
 }
 
 .row {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
   width: 100%;
-  padding: 6px 9px;
-  border: 0;
   border-bottom: 1px solid var(--line);
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 6px 9px;
+  border: 0;
   border-radius: 0;
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
+.row-eye {
+  flex: none;
+  margin: 4px 5px 0 0;
+  width: 26px;
+  height: 24px;
+}
+
+.row-eye .ic { font-size: 17px; }
 .row:last-child { border-bottom: 0; }
 .row:hover { background: var(--soft); }
 .row.active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.row.dimmed .row-main { opacity: .5; }
+.row.dimmed .row-eye { color: var(--muted); }
 .row .name { font-weight: 600; word-break: break-word; }
 .row .meta { display: flex; gap: 6px; align-items: baseline; color: var(--muted); font-size: 12px; }
 .row .model { color: var(--accent); }
